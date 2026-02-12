@@ -43,32 +43,32 @@ Given a self-recorded input video and a selected object in the first frame, the 
 📁 Project Structure
 tracking_an_object_in_self_recorded_videos/
 
-│
+
 ├── input/
     
-│   └── (User-uploaded or sample videos)
-│
+   └── (User-uploaded or sample videos)
+
 ├── Output_final/
     
-│   └── (Generated result videos/images)
-│
+   └── (Generated result videos/images)
+
 ├── Report/
     
-│   └── (Project documentation and report files)
-│
+  └── (Project documentation and report files)
+
 ├── main.ipynb
     
-│   └── (Main execution notebook for object tracking)
-│
+  └── (Main execution notebook for object tracking)
+
 ├── requirements.txt
     
 │   └── (Python dependencies)
 
-│
+
 ├── README.md
     
-│   └── (Project description and instructions)
-│
+   └── (Project description and instructions)
+
 └── .gitignore
     
     └── (Ignored files for version control)
