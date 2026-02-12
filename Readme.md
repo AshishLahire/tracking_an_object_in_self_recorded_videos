@@ -70,7 +70,5 @@ tracking_an_object_in_self_recorded_videos/
    └── (Project description and instructions)
 
 └── .gitignore
-    
-    └── (Ignored files for version control)
 
 
