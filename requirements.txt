@@ -1,0 +1,8 @@
+!pip install --upgrade pip
+!pip install opencv-python matplotlib
+Python 
+PyTorch 
+OpenCV 
+NumPy  
+CoTracker-v3  
+Matplotlib

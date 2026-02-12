@@ -41,5 +41,13 @@ Given a self-recorded input video and a selected object in the first frame, the 
 ---
 
 ## 📁 Project Structure
-
+tracking_an_object_in_self_recorded_videos/
+│
+├── Output_final/ # Generated result videos or images
+├── Report/ # Project report and documentation
+├── input/ # Sample or user-uploaded videos
+├── requirements.txt # Python dependencies
+├── README.md # This file
+|--main.ipynb
+└── .gitignore # Ignored files
 
