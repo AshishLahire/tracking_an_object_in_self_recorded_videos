@@ -1,210 +1,278 @@
-# Object Tracking in Self-Recorded Videos
+<div align="center">
 
-Track any object in your own phone or camera video: click on it once, and get its path, its box,
-its speed, line crossings and a heatmap, with CSV/JSON exports. Built on
-[CoTracker3](https://github.com/facebookresearch/co-tracker) (Meta AI), OpenCV and PyTorch.
+# 🎯 Object Tracking in Self-Recorded Videos
 
+**Click on anything in your own video, and measure how it moves.**
+
+Track an object through a phone or camera video, then measure its speed, count line crossings,
+measure joint angles for rehab, or measure gravity for a physics lab.
+Built on [CoTracker3](https://github.com/facebookresearch/co-tracker), PyTorch and OpenCV.
+
+[![Tests](https://github.com/AshishLahire/tracking_an_object_in_self_recorded_videos/actions/workflows/tests.yml/badge.svg)](https://github.com/AshishLahire/tracking_an_object_in_self_recorded_videos/actions/workflows/tests.yml)
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/AshishLahire/tracking_an_object_in_self_recorded_videos/blob/main/notebooks/colab_demo.ipynb)
-[![Live demo on Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Live%20demo-Hugging%20Face-yellow)](https://huggingface.co/spaces/YOUR_HF_USERNAME/object-tracker)
-[![tests](https://github.com/AshishLahire/tracking_an_object_in_self_recorded_videos/actions/workflows/tests.yml/badge.svg)](https://github.com/AshishLahire/tracking_an_object_in_self_recorded_videos/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.x-EE4C2C?logo=pytorch&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-4.x-5C3EE8?logo=opencv&logoColor=white)
+![Gradio](https://img.shields.io/badge/Web%20app-Gradio-F97316)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 
-This project started as a research task at IIT Mandi.
+<img src="docs/gifs/plane_speed.gif" width="520" alt="Plane takeoff tracked with a moving box and live speed">
 
-**Plane takeoff, measured from a panning video:** box tracking, camera-motion compensation, and
-the plane's own length (39.5 m) as the ruler. The measured speed climbs to about 290 km/h at liftoff, in
-line with a Boeing 737-800's typical takeoff speed (about 280–300 km/h).
+<sub>A Boeing 737 takeoff filmed with a panning camera. Using the plane's own 39.5 m length as the ruler and
+compensating for the camera's motion, the measured speed reaches about 290 km/h at liftoff,
+in line with the 737-800's typical takeoff speed (about 280–300 km/h).</sub>
 
-![](docs/gifs/plane_speed.gif)
+[Features](#-features) •
+[Demo](#-demo) •
+[Accuracy](#-accuracy) •
+[Quick start](#-quick-start) •
+[Usage](#-usage) •
+[Deploy](#-deploy) •
+[How it works](#-how-it-works)
 
-| Bicycle | Car (side view) | Plane |
-|---|---|---|
-| ![](docs/gifs/bicycle.gif) | ![](docs/gifs/car_side.gif) | ![](docs/gifs/plane.gif) |
-| **Tiger** | **Paragliding** | **Apple (moving camera)** |
-| ![](docs/gifs/tiger.gif) | ![](docs/gifs/paragliding.gif) | ![](docs/gifs/apple.gif) |
+</div>
 
 ---
 
-## 💡 Features
+## ✨ Features
 
-| | |
-|---|---|
-| **Click to track** | Click one or more points on the object, or draw a box around it. Box mode tracks a grid of points, ignores background caught in the box, and moves the box with the object. |
-| **Handles real videos** | Occlusions (the path breaks while the object is hidden), any resolution (large videos are downscaled), any frame rate (kept in the output). |
-| **Speed and distance** | Mark something of known length once (a 1 m stick, a 4.5 m car) to get km/h and metres. Without it, results are in pixels. If the reference is the tracked object itself, the scale follows the object's size, so speed stays right as it comes closer or moves away. |
-| **Line crossings** | Draw a line and get the time and direction of every crossing, e.g. counting vehicles or laps. |
-| **Zones** | Draw a polygon to get entries, exits and time spent inside. |
-| **Joint angles (rehab / exercise)** | Click three points (e.g. hip, knee, ankle) to get the joint angle in every frame, the range of motion and the number of repetitions, with a per-frame angle CSV. In a test video with known angles, the error was 0.5° on average and every repetition was counted. |
-| **Physics lab** | Track a thrown or falling ball (with a reference length in the scene) to measure **g**, launch speed and angle; the throw and landing are trimmed off automatically. Track a pendulum to measure its period, and g from its length. In test videos with known physics: g within 0.1% for the projectile and 0.01% for the pendulum. |
-| **Heatmap** | Shows where the object spent the most time. |
-| **Shaky-camera compensation** | Removes handheld shake and panning before measuring, so speed reflects the object's motion, not the camera's. |
-| **Exports** | Annotated video (H.264, plays in browsers), per-point CSV, per-frame object CSV (position, speed, box), JSON summary, heatmap PNG. |
-| **Three ways to use it** | Web app, command line, or Python / notebook. |
+### 📍 Tracking
+- **Click to track:** select one or more points, or draw a box. Box mode tracks a grid of points, ignores background caught in the box, and moves the box with the object.
+- **Built for real phone videos:** handles occlusion (the path breaks while the object is hidden), any resolution (large videos are downscaled as they load), and any frame rate (kept in the output).
+- **Camera-shake compensation:** removes handheld shake and panning, so measurements reflect the object's own motion.
+
+### 📏 Measurement
+- **Speed and distance** in km/h and metres, from a reference of known length. If the reference is the object itself, the scale follows its size as it moves closer or farther away.
+- **Line crossings** with time and direction, e.g. counting vehicles or laps.
+- **Zones:** entries, exits and time spent inside a region.
+- **Heatmap** of where the object spent its time.
+
+### 🦵 Joint angles for physiotherapy and rehab
+Click three points (e.g. hip → knee → ankle) to get the joint angle in every frame, the **range of
+motion** and the **number of repetitions**. Range of motion is normally measured by hand with a goniometer;
+with this, a patient can film an exercise at home and compare progress week by week.
+
+### 🧪 Physics lab
+- **Projectile or falling object:** measures **g**, launch speed and launch angle. The throw and the landing are trimmed off automatically.
+- **Pendulum:** measures the **period**, and g from the pendulum's length.
+
+It turns a phone into lab equipment for schools that have no motion sensors.
+
+### 📦 Outputs
+- An annotated **H.264 video** that plays in any browser.
+- **CSV files:** one row per point, one row per frame for the object, and joint angles.
+- A **JSON summary** and a **heatmap PNG**.
+
+All of it is available from a **web app**, the **command line** and a **Python API**.
+
+---
+
+## 🎬 Demo
+
+| Joint angle and repetitions | Projectile: g from a throw | Pendulum: period and g |
+|:---:|:---:|:---:|
+| <img src="docs/gifs/joint_angle.gif" width="260"> | <img src="docs/gifs/physics_projectile.gif" width="260"> | <img src="docs/gifs/physics_pendulum.gif" width="260"> |
+
+| Bicycle | Car (drone shot) | Plane |
+|:---:|:---:|:---:|
+| <img src="docs/gifs/bicycle.gif" width="260"> | <img src="docs/gifs/car_side.gif" width="260"> | <img src="docs/gifs/plane.gif" width="260"> |
+| **Tiger** | **Paragliding** | **Apple (moving camera)** |
+| <img src="docs/gifs/tiger.gif" width="260"> | <img src="docs/gifs/paragliding.gif" width="260"> | <img src="docs/gifs/apple.gif" width="260"> |
+
+<sub>The joint-angle and physics clips are rendered test videos with known ground truth, used to measure accuracy (see below).</sub>
+
+---
+
+## 📊 Accuracy
+
+Each measurement mode was checked with the real model against videos where the true answer is known.
+
+| Test | Measured | True value |
+|---|---|---|
+| Joint angle, hinge bending 170° → 90° (3 reps) | 0.5° mean error (1.2° max); ROM 78.4°; 3 reps | ROM 79.6°; 3 reps |
+| Projectile: gravity | **9.817 ± 0.075 m/s²** (+0.1%) | 9.81 m/s² |
+| Projectile: launch speed and angle | 2.89 m/s at 58.7° | 2.92 m/s at 59.0° |
+| Pendulum period (0.6 m) | **1.5541 s** → g = 9.808 m/s² (+0.01%) | 1.5539 s |
+| Plane takeoff (real video) | about 290 km/h at liftoff | 737-800: about 280–300 km/h |
+| Lower model resolution (192×256 vs 384×512) | tracked points within about 1 px | — |
+
+The test videos are clean, rendered scenes, so expect lower accuracy on real footage. See [Limitations](#%EF%B8%8F-limitations).
+
+---
+
+## 🚀 Quick start
+
+```bash
+git clone https://github.com/AshishLahire/tracking_an_object_in_self_recorded_videos.git
+cd tracking_an_object_in_self_recorded_videos
+pip install -r requirements.txt
+python app.py
+```
+
+Then open **http://127.0.0.1:7860**.
+
+The first run downloads the CoTracker3 model (about 100 MB). A GPU is optional: on a CPU, a 10-second clip takes a few minutes.
+
+**No install:** open the [Colab notebook](https://colab.research.google.com/github/AshishLahire/tracking_an_object_in_self_recorded_videos/blob/main/notebooks/colab_demo.ipynb). It runs the app on a free GPU and gives you a temporary public link.
+
+---
+
+## 🧭 Usage
+
+### Web app
+1. Upload a video, or pick an example.
+2. Choose the frame where the object is clearly visible.
+3. Choose what a click adds, then click on the frame:
+   - **Point** or **Box:** the object to track.
+   - **Joint angle:** three clicks: end → joint → end.
+   - **Reference length**, **Counting line** or **Zone**.
+4. Optionally open **Physics lab** and choose *Projectile* or *Pendulum*.
+5. Press **Track**. You get the video, a summary, charts and downloads.
+
+### Command line
+
+```bash
+# track one point on the cyclist, selected on frame 70
+python cli.py --video examples/bicycle.mp4 --frame 70 --point 125,50
+```
+
+```bash
+# vehicle speed: box + the plane's own length as the ruler + camera-motion compensation
+python cli.py --video examples/plane.mp4 --box 205,100,372,152 --grid 5 --stabilize \
+    --reference 210,135,345,127,39.5 --reference-is-object --csv results/plane.csv
+```
+
+```bash
+# rehab: knee range of motion and repetitions (hip, knee, ankle on frame 0, filmed side-on)
+python cli.py --video my_exercise.mp4 --joint 210,120,220,260,230,400 --joint-name knee --csv results/knee.csv
+```
+
+```bash
+# physics lab: g from a thrown ball, with a 1 m ruler in the same plane
+python cli.py --video throw.mp4 --point 120,300 --physics projectile --reference 100,340,350,340,1.0
+```
+
+```bash
+# physics lab: pendulum period, and g from its 0.6 m length
+python cli.py --video pendulum.mp4 --point 335,198 --physics pendulum --pendulum-length 0.6
+```
+
+```bash
+# count line crossings and time spent in a zone
+python cli.py --video examples/bicycle.mp4 --frame 70 --point 125,50 \
+    --line 300,60,300,200 --zone "250,100;420,100;420,240;250,240"
+```
+
+All coordinates are pixels of the original video, on `--frame`. Run `python cli.py --help` for every option.
+
+<details>
+<summary><b>Python API</b></summary>
+
+```python
+from tracker import track_video   # with src/ on the path, or after `pip install -e .`
+
+r = track_video("examples/plane.mp4", box=(205, 100, 372, 152), box_grid=5, stabilize=True,
+                reference=(210, 135, 345, 127, 39.5), reference_is_object=True,
+                output_path="results/plane.mp4", csv_path="results/plane.csv")
+print(r.summary()["motion"])          # distance, average and top speed
+
+r = track_video("my_exercise.mp4", joints=[[(210, 120), (220, 260), (230, 400)]], joint_names=["knee"])
+print(r.joints[0]["rom_deg"], r.joints[0]["reps"])
+```
+</details>
+
+<details>
+<summary><b>GPU vs CPU (<code>--mode</code>, <code>--model-res</code>)</b></summary>
+
+- **`offline`** sees the whole video at once. It gives the best quality and also tracks before the selected frame, but needs a GPU.
+- **`online`** works through 16-frame windows, so memory stays flat. It tracks forward only.
+- **`auto`** (the default) uses offline on a GPU and online on a CPU.
+- **`--model-res 192x256`** roughly halves memory use and doubles speed, with points within about 1 px of full resolution.
+</details>
 
 ---
 
 ## 🌍 Real-world uses
 
-| Who | Problem | What to use |
+| Who | Problem | What this gives them |
 |---|---|---|
-| Sports coaches and athletes | Ball flight, sprint speed, jump arc from a phone video | Point tracking, reference length, CSV |
-| Physics students and teachers | Schools without motion sensors or photogates can't measure motion experiments | Physics lab mode: a phone video gives g, launch speed and pendulum period, with the measured path and fitted model ready for a lab report |
-| Wildlife and agriculture researchers | Animal movement and behaviour from field footage | Box tracking, heatmap, zones |
-| Traffic and road-safety studies | Vehicle speed and counts at a junction | Reference length, counting lines |
-| Physiotherapy and rehab | Range of motion is measured by hand with a goniometer, and patients can't measure at home | Joint-angle mode: film an exercise, get range of motion and repetitions, compare week by week |
-| Video creators | Making text or blur follow an object | Box track as per-frame CSV |
-
-**Limits.**
-- It works on recorded videos (offline), not live CCTV.
-- Speed is an estimate. It is most accurate with a still camera that sees the motion side-on.
-- With a fixed reference (e.g. a stick on the ground), the object must stay about as far from the camera as the reference.
-- With `--reference-is-object` the object can come closer or move away, but the box must fit it tightly.
-- A camera that follows the object (e.g. a drone) needs `--stabilize` and a visible background.
-- Physics lab needs a still camera, side-on to the motion, with the reference at the same distance as the object. The pendulum formula assumes small swings (under about 15°), and a higher frame rate (60 fps) gives better results.
-- Joint angles are measured in the video plane, so film the joint side-on. Loose clothing over the joint lowers accuracy. Treat the results as a progress aid, not a medical diagnosis.
-- Do not track people without their consent.
+| 🦵 Physiotherapists and patients | Range of motion is measured by hand, only in the clinic | Joint angle, range of motion and reps from a home video |
+| 🧪 Students and teachers | No motion sensors or photogates in many schools | g, launch speed and pendulum period from a phone video |
+| 🚗 Road-safety studies | Vehicle speeds and counts need radar or manual counting | Speed with a reference length, counting lines |
+| ⚽ Coaches and athletes | Ball and sprint speed, paths | Point or box tracking, speed, CSV export |
+| 🐾 Wildlife researchers | Movement patterns from field footage | Box tracking, heatmap, zones |
 
 ---
 
-## ▶️ Quick start
+## ☁️ Deploy
 
-```bash
-pip install -r requirements.txt
-```
+| Option | Cost | Notes |
+|---|---|---|
+| **Google Colab** | Free | One click from the badge above. Free GPU, temporary public link. |
+| **Render** (`render.yaml` + `Dockerfile`) | Paid (2 GB plan) | Dashboard → *New → Blueprint* → select this repo. The model peaked at about 1.8 GB in testing with the defaults below, so 512 MB plans run out of memory. |
+| **Hugging Face Spaces** | Free (16 GB RAM) | `python deploy/prepare_space.py`, then upload `build/space` as a Gradio Space. |
+| **Any Docker host** | — | `docker build -t object-tracker .` then `docker run -p 10000:10000 object-tracker` |
 
-The first run downloads the CoTracker3 model (~100 MB) via `torch.hub`, so it needs internet access.
-
-### 1. Web app
-
-```bash
-python app.py
-```
-
-Open http://127.0.0.1:7860, then:
-1. Upload a video or pick an example.
-2. Choose the frame.
-3. Click on the object.
-4. Optionally add a reference length, line or zone.
-5. Press **Track**.
-
-### 2. Command line
-
-```bash
-# one point on the cyclist, selected on frame 70
-python cli.py --video examples/bicycle.mp4 --frame 70 --point 125,50
-
-# plane takeoff: box around the plane, its 39.5 m length as the ruler, panning camera compensated
-python cli.py --video examples/plane.mp4 --box 205,100,372,152 --grid 5 --stabilize \
-    --reference 210,135,345,127,39.5 --reference-is-object \
-    --csv results/plane.csv --json results/plane.json --heatmap results/plane_heat.png --browser
-
-# knee range of motion and repetitions: hip, knee, ankle on frame 0 (film side-on)
-python cli.py --video my_exercise.mp4 --joint 210,120,220,260,230,400 --joint-name knee --csv results/knee.csv
-
-# physics lab: measure g from a thrown ball (a 1 m ruler lies in the same plane, from x=100 to x=350)
-python cli.py --video throw.mp4 --point 120,300 --physics projectile --reference 100,340,350,340,1.0
-
-# physics lab: pendulum period, and g from its 0.6 m length
-python cli.py --video pendulum.mp4 --point 335,198 --physics pendulum --pendulum-length 0.6
-
-# count crossings of a line and time spent inside a zone
-python cli.py --video examples/bicycle.mp4 --frame 70 --point 125,50 \
-    --line 300,60,300,200 --zone "250,100;420,100;420,240;250,240"
-```
-
-All coordinates are pixels of the original video on `--frame`. Run `python cli.py --help` for every option:
-- `--zone "x,y;x,y;x,y"` adds a zone.
-- `--stabilize` turns on shaky-camera compensation.
-- `--max-side` and `--max-frames` limit resolution and length.
-- `--mode` chooses how the model processes the video (see below).
-
-After `pip install -e .`, the same command is available as `object-tracker ...`.
-
-### 3. Python
-
-```python
-from tracker import track_video   # with src/ on the path, or after pip install -e .
-
-r = track_video("examples/plane.mp4", box=(205, 100, 372, 152), box_grid=5, stabilize=True,
-                reference=(210, 135, 345, 127, 39.5), reference_is_object=True,
-                output_path="results/plane.mp4", csv_path="results/plane.csv")
-print(r.summary()["motion"])
-```
-
-`notebooks/demo.ipynb` walks through the same steps with plots.
-
-### GPU vs CPU (`--mode`)
-
-- **offline** sees the whole video at once. It gives the best quality and also tracks before the selected frame, but memory grows with video length, so use it on a GPU.
-- **online** works through 16-frame windows, so memory stays flat, but it tracks forward only.
-- **auto** (the default) uses offline on a GPU and online on a CPU.
-
-On a laptop CPU, expect a few minutes for a 10-second clip. On a GPU (e.g. Colab's free T4) it takes seconds.
+**Settings for small servers** (set them as environment variables):
+- `TRACKER_MODEL_RES=192x256`: lower model resolution, about half the memory.
+- `MAX_SECONDS`: longest part of a video that is processed.
+- `MAX_SIDE`: frames are downscaled to this longer side.
 
 ---
 
-## 🚀 Publish it (public link)
+## 🔍 How it works
 
-1. **GitHub.** This repository. The tests workflow runs on every push.
-2. **Hugging Face Space (free live demo).**
-   - Create a free account, and a write token at https://huggingface.co/settings/tokens.
-   - Run:
-     ```bash
-     python deploy/prepare_space.py
-     ```
-     ```bash
-     huggingface-cli login
-     ```
-     ```bash
-     huggingface-cli upload YOUR_HF_USERNAME/object-tracker build/space . --repo-type=space
-     ```
-   - Then replace `YOUR_HF_USERNAME` above.
-   - The free CPU Space processes up to 15 s per video at 512 px. Change `MAX_SECONDS` and `MAX_SIDE` in the Space settings.
-3. **Colab.** The badge above opens `notebooks/colab_demo.ipynb`, which runs the app on a free GPU and prints a temporary public link.
-4. **Render (Docker).** This repository includes a `Dockerfile` and a `render.yaml` blueprint.
-   - In the Render dashboard choose **New → Blueprint** and pick this repository. Render builds the image and gives you an `https://<name>.onrender.com` link.
-   - **Memory:** with the defaults below, a run peaked at about 1.8 GB in testing (a 25-point box on a 511-frame clip), so it needs at least Render's 2 GB **Standard** plan. The free and Starter plans (512 MB) run out of memory. If the service restarts with an out-of-memory error, use a 4 GB plan or fewer box points. Check current prices at https://render.com/pricing.
-   - **Defaults for a 1-CPU instance:**
-     - `TRACKER_MODEL_RES=192x256`: about half the memory of full resolution, with points within about 1 px of it in tests.
-     - `MAX_SECONDS=10` and `MAX_SIDE=384`.
-     - Change them under the service's **Environment** settings.
-   - **Speed:** on one CPU, expect about 1 minute per second of video (the 8.5-second plane clip took about 8 minutes).
+```mermaid
+flowchart LR
+    A[Video] --> B[Load and resize<br/>frame by frame]
+    B --> C[CoTracker3<br/>point tracking]
+    S[Points / box / joints<br/>clicked on one frame] --> C
+    C --> D[Occlusion-aware<br/>smoothing]
+    D --> E[Object box<br/>background filtering]
+    E --> F[Camera-motion<br/>compensation]
+    F --> G{Measurements}
+    G --> H[Speed, distance,<br/>lines, zones, heatmap]
+    G --> I[Joint angles,<br/>ROM, repetitions]
+    G --> J[Physics fits:<br/>projectile, pendulum]
+    H & I & J --> K[Video, CSV, JSON]
+```
+
+1. **Tracking.** CoTracker3 follows the selected points through every frame and predicts when each point is hidden.
+2. **Cleaning.** Paths are smoothed only across visible stretches. In box mode, points that don't move with the object (background caught in the box) are dropped.
+3. **Measuring.** Pixels become metres through a reference of known length. Camera motion is estimated from the background with sparse optical flow and removed.
+4. **Models.** Joint angles come from vector geometry. Physics uses least-squares fits of `y = y₀ + v₀t + ½gt²` and of a damped cosine, with standard errors.
 
 ---
 
-## 📁 Project Structure
+## 📁 Project structure
 
 ```
 ├── app.py                  # web app (Gradio)
 ├── cli.py                  # command line
 ├── src/tracker/
 │   ├── pipeline.py         # track_video(): video + selection -> video, CSV, JSON, measurements
-│   ├── model.py            # CoTracker3 (offline / online modes)
-│   ├── selection.py        # box -> points, points -> moving box, background-point filtering
+│   ├── model.py            # CoTracker3 (offline / online modes, model resolution)
+│   ├── selection.py        # box -> points, points -> moving box, background filtering
 │   ├── analysis.py         # speed, distance, line crossings, zones, heatmap
 │   ├── joints.py           # joint angles, range of motion, repetition counting
-│   ├── physics.py          # physics lab: projectile and pendulum fits
+│   ├── physics.py          # projectile and pendulum fits
 │   ├── stabilize.py        # camera-motion compensation
 │   ├── smoothing.py        # occlusion-aware smoothing
-│   ├── draw.py             # overlays (paths, boxes, lines, zones, labels)
+│   ├── draw.py             # overlays: paths, boxes, joints, curves, labels
 │   ├── video_io.py         # video read/write, CSV export, H.264 re-encode, GIFs
-│   ├── metrics.py          # evaluation metrics
+│   ├── metrics.py          # tracking metrics
 │   └── cli.py
-├── notebooks/
-│   ├── demo.ipynb          # step-by-step walkthrough
-│   ├── colab_demo.ipynb    # one-click Colab version (GPU + public link)
-│   └── original_experiment.ipynb
-├── examples/               # sample input videos
-├── results/videos/         # tracked videos from the experiments
-├── docs/                   # report, screenshots, GIFs
+├── notebooks/              # demo, Colab and the original experiment
+├── examples/               # sample videos
+├── results/videos/         # tracked results
+├── docs/                   # project report, screenshots, GIFs
+├── tests/                  # 60 tests, no model download needed
 ├── deploy/                 # Hugging Face Space packaging
-├── tests/                  # pytest, no model download needed
-├── .github/workflows/      # CI
-├── requirements.txt / requirements-dev.txt / pyproject.toml
+├── Dockerfile · render.yaml
+└── requirements.txt · requirements-dev.txt · pyproject.toml
 ```
 
----
-
-## 🧪 Evaluation and tests
+Run the tests:
 
 ```bash
 pip install -r requirements-dev.txt
@@ -214,13 +282,25 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-The tests use synthetic videos and a fake tracker, so they run in seconds without the model.
+---
 
-Without ground truth, the metrics (Smoothness, Continuity, Trajectory Length) describe how the track
-behaves, not how accurate it is. Pass `gt_tracks` and `gt_visibility` to `tracker.evaluate_tracking`
-for MSE, EPE, PCK and visibility accuracy.
+## ⚠️ Limitations
 
-## 📜 License note
+- **Recorded video only.** This works on recorded clips, not live CCTV. A CPU takes about 1 minute per second of video at full quality.
+- **Measurements are 2D.** For accurate speed, angles and physics, film side-on, with the reference at the same distance as the object.
+- **Joint angles** are measured in the video plane. Loose clothing over the joint lowers accuracy. Use them as a progress aid, not a medical diagnosis.
+- **Physics lab** needs a still camera. The pendulum formula assumes small swings (under about 15°). Higher frame rates (60 fps) give better results.
+- **Consent.** Do not track people without their consent.
 
-CoTracker3's code and weights are released by Meta under **CC BY-NC 4.0**, which allows
-non-commercial use only. Check its license before any commercial use.
+---
+
+## 🙏 Credits
+
+- **[CoTracker3](https://github.com/facebookresearch/co-tracker)** by Meta AI: the point-tracking model. Its code and weights are licensed **CC BY-NC 4.0**, which allows **non-commercial use only**.
+- Developed by **Ashish Lahire**. The project started as a research task at **IIT Mandi**. The original project report is in [`docs/report/`](docs/report/Project_Report.pdf).
+
+<div align="center">
+
+⭐ If this project is useful to you, please star the repository.
+
+</div>
