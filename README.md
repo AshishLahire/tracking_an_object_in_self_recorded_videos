@@ -204,7 +204,7 @@ print(r.joints[0]["rom_deg"], r.joints[0]["reps"])
 
 ---
 
-## ☁️ Deploy
+## 🌐 Deploy
 
 | Option | Cost | Notes |
 |---|---|---|
