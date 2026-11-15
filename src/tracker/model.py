@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from typing import Callable, Optional
 
@@ -20,6 +21,20 @@ def get_device(device: Optional[str] = None) -> str:
 
 
 MODES = ("auto", "offline", "online")
+DEFAULT_RESOLUTION = (384, 512)     # (H, W) the model was trained at
+
+
+def parse_resolution(value) -> Optional[tuple]:
+    """``"192x256"`` / ``(192, 256)`` / ``None`` -> ``(H, W)`` or ``None``. Both sides must be multiples of 32."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        h, w = (int(v) for v in value.lower().replace(" ", "").split("x"))
+    else:
+        h, w = (int(v) for v in value)
+    if h < 64 or w < 64 or h % 32 or w % 32:
+        raise ValueError(f"model resolution must be HxW, multiples of 32 and at least 64, got {value!r}")
+    return h, w
 
 
 def resolve_mode(mode: str, device: str) -> str:
@@ -48,7 +63,8 @@ def _to_video_tensor(frames: np.ndarray, device: str) -> torch.Tensor:
 @torch.inference_mode()
 def run_cotracker(frames: np.ndarray, queries: np.ndarray, model=None,
                   device: Optional[str] = None, mode: str = "auto",
-                  progress: Optional[Callable[[float], None]] = None, **kwargs):
+                  progress: Optional[Callable[[float], None]] = None,
+                  model_resolution=None, **kwargs):
     """Track query points through a video.
 
     Args:
@@ -60,6 +76,9 @@ def run_cotracker(frames: np.ndarray, queries: np.ndarray, model=None,
             short sliding windows (memory stays flat, only tracks forward from the query
             frame); ``"auto"`` picks offline on GPU and online on CPU.
         progress: optional ``fn(fraction)`` called as the online mode works through the video.
+        model_resolution: ``(H, W)`` or ``"HxW"`` the model works at internally (default 384x512,
+            or the ``TRACKER_MODEL_RES`` environment variable). Lower values need much less memory
+            and time (192x256: ~1.5 GB peak instead of ~3.5 GB) at a small cost in precision.
         **kwargs: passed to the offline model call (e.g. ``backward_tracking=True``).
 
     Returns:
@@ -69,6 +88,9 @@ def run_cotracker(frames: np.ndarray, queries: np.ndarray, model=None,
     mode = resolve_mode(mode, device)
     if model is None:
         model = load_cotracker(device, mode)
+    res = parse_resolution(model_resolution) or parse_resolution(os.environ.get("TRACKER_MODEL_RES"))
+    if hasattr(model, "interp_shape"):
+        model.interp_shape = res or DEFAULT_RESOLUTION
     q = torch.as_tensor(np.asarray(queries), dtype=torch.float32, device=device)[None]  # (1, N, 3)
 
     if mode == "offline":
@@ -87,14 +109,19 @@ def _run_online(model, frames: np.ndarray, q: torch.Tensor, device: str, progres
     step = model.step
     # Pad with copies of the last frame so the final windows cover every real frame
     n_windows = max(1, -(-max(T - step, 1) // step))
-    padded_len = n_windows * step + step
-    if padded_len > T:
-        frames = np.concatenate([frames, np.repeat(frames[-1:], padded_len - T, axis=0)])
+
+    def window(start):
+        # frames past the end are copies of the last frame; only this window is padded,
+        # never the whole video (that would duplicate every frame in memory)
+        chunk = frames[start:start + 2 * step]
+        if len(chunk) < 2 * step:
+            chunk = np.concatenate([chunk, np.repeat(frames[-1:], 2 * step - len(chunk), axis=0)])
+        return _to_video_tensor(chunk, device)
 
     model(video_chunk=_to_video_tensor(frames[:1], device), is_first_step=True, queries=q)
     tracks = visibility = None
     for i, start in enumerate(range(0, n_windows * step, step)):
-        tracks, visibility = model(video_chunk=_to_video_tensor(frames[start:start + 2 * step], device))
+        tracks, visibility = model(video_chunk=window(start))
         if progress:
             progress((i + 1) / n_windows)
     return tracks, visibility

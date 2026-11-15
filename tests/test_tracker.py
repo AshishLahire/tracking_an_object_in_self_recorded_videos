@@ -182,3 +182,24 @@ def test_resolve_mode():
     assert resolve_mode("offline", "cpu") == "offline"
     with pytest.raises(ValueError):
         resolve_mode("fast", "cpu")
+
+
+def test_parse_model_resolution():
+    pytest.importorskip("torch")
+    from tracker.model import parse_resolution
+    assert parse_resolution("192x256") == (192, 256)
+    assert parse_resolution((256, 352)) == (256, 352)
+    assert parse_resolution(None) is None and parse_resolution("") is None
+    for bad in ("200x256", "32x32", "abc"):
+        with pytest.raises(ValueError):
+            parse_resolution(bad)
+
+
+def test_model_resolution_is_applied():
+    pytest.importorskip("torch")
+    from tracker.model import run_cotracker
+    m = _FakeOnlineModel()
+    m.interp_shape = (384, 512)
+    run_cotracker(np.zeros((10, 32, 48, 3), np.uint8), np.array([[0, 5, 5]], np.float32),
+                  model=m, device="cpu", mode="online", model_resolution="192x256")
+    assert m.interp_shape == (192, 256)

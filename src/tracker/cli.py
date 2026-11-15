@@ -95,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-frames", type=int, help="only process the first N frames")
     run.add_argument("--no-smooth", action="store_true", help="use the raw model output")
     run.add_argument("--device", choices=["cpu", "cuda"], help="default: cuda if available")
+    run.add_argument("--model-res", help="resolution the model works at, e.g. 192x256 "
+                                          "(default 384x512; lower = less memory, faster, slightly less precise)")
     run.add_argument("--mode", choices=["auto", "offline", "online"], default="auto",
                      help="offline = whole video at once (best, needs lots of memory); online = sliding "
                           "windows (low memory, tracks forward only); auto = offline on GPU, online on CPU")
@@ -128,7 +130,7 @@ def main(argv=None) -> int:
             args.video, args.point, query_frame=args.frame, box=args.box, box_grid=args.grid,
             output_path=output, csv_path=args.csv, json_path=args.json, heatmap_path=args.heatmap,
             max_side=args.max_side or None, max_frames=args.max_frames,
-            smooth=not args.no_smooth, device=args.device, mode=args.mode,
+            smooth=not args.no_smooth, device=args.device, mode=args.mode, model_resolution=args.model_res,
             reference=args.reference, reference_is_object=args.reference_is_object,
             count_lines=args.line, zones=args.zone,
             stabilize=args.stabilize, browser_compatible=args.browser, progress=progress)

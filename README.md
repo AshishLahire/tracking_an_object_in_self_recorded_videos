@@ -147,6 +147,14 @@ On a laptop CPU, expect a few minutes for a 10-second clip. On a GPU (e.g. Colab
    - Then replace `YOUR_HF_USERNAME` above.
    - The free CPU Space processes up to 15 s per video at 512 px. Change `MAX_SECONDS` and `MAX_SIDE` in the Space settings.
 3. **Colab.** The badge above opens `notebooks/colab_demo.ipynb`, which runs the app on a free GPU and prints a temporary public link.
+4. **Render (Docker).** This repository includes a `Dockerfile` and a `render.yaml` blueprint.
+   - In the Render dashboard choose **New → Blueprint** and pick this repository. Render builds the image and gives you an `https://<name>.onrender.com` link.
+   - **Memory:** with the defaults below, a run peaked at about 1.8 GB in testing (a 25-point box on a 511-frame clip), so it needs at least Render's 2 GB **Standard** plan. The free and Starter plans (512 MB) run out of memory. If the service restarts with an out-of-memory error, use a 4 GB plan or fewer box points. Check current prices at https://render.com/pricing.
+   - **Defaults for a 1-CPU instance:**
+     - `TRACKER_MODEL_RES=192x256`: about half the memory of full resolution, with points within about 1 px of it in tests.
+     - `MAX_SECONDS=10` and `MAX_SIDE=384`.
+     - Change them under the service's **Environment** settings.
+   - **Speed:** on one CPU, expect about 1 minute per second of video (the 8.5-second plane clip took about 8 minutes).
 
 ---
 

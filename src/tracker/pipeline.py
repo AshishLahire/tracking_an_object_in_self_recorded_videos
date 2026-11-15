@@ -113,6 +113,7 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
                 json_path: Optional[str] = None, heatmap_path: Optional[str] = None,
                 max_side: Optional[int] = 640, max_frames: Optional[int] = None,
                 smooth: bool = True, device: Optional[str] = None, mode: str = "auto",
+                model_resolution=None,
                 reference: Optional[Sequence[float]] = None, reference_is_object: bool = False,
                 count_lines: Optional[Sequence[Sequence[float]]] = None,
                 zones: Optional[Sequence[Sequence[Sequence[float]]]] = None,
@@ -133,7 +134,7 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
             ``csv_path`` writes per-point rows plus ``<name>_object.csv`` with one row per frame.
         max_side / max_frames: see :func:`tracker.video_io.load_video`.
         smooth: occlusion-aware smoothing of the tracks before drawing / measuring.
-        device / mode: see :func:`tracker.model.run_cotracker`.
+        device / mode / model_resolution: see :func:`tracker.model.run_cotracker`.
         reference: ``(x1, y1, x2, y2, length_m)``: a segment of known real length, so speed
             and distance are reported in km/h and metres instead of pixels.
         reference_is_object: the reference was measured on the tracked object itself (e.g. the
@@ -169,6 +170,7 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
         from .model import run_cotracker          # imported lazily: needs torch + download
         msg = f"Tracking {len(queries)} point(s) over {video.num_frames} frames"
         tracks, visibility = run_cotracker(video.frames, queries, device=device, mode=mode,
+                                           model_resolution=model_resolution,
                                            progress=lambda f: report(0.1 + 0.65 * f, msg))
     else:
         tracks, visibility = tracker_fn(video.frames, queries)

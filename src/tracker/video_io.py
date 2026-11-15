@@ -57,27 +57,40 @@ def load_video(path: str, max_side: Optional[int] = 640, max_frames: Optional[in
     if not fps or fps <= 0 or np.isnan(fps):
         fps = DEFAULT_FPS
 
-    frames = []
+    # Frames are resized as they are read and written into one preallocated array, so a long
+    # 1080p/4K video never sits in memory at full resolution (or twice, as list + stacked copy).
+    expected = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if max_frames is not None:
+        expected = min(expected, max_frames) if expected > 0 else max_frames
+    frames = None
+    n = 0
+    h0 = w0 = 0
+    scale, new_size = 1.0, None
     try:
-        while max_frames is None or len(frames) < max_frames:
+        while max_frames is None or n < max_frames:
             ok, frame = cap.read()
             if not ok:
                 break
-            frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            if frames is None:
+                h0, w0 = frame.shape[:2]
+                if max_side is not None and max(h0, w0) > max_side:
+                    scale = max_side / max(h0, w0)
+                    new_size = (_even(w0 * scale), _even(h0 * scale))
+                h, w = (new_size[1], new_size[0]) if new_size else (h0, w0)
+                frames = np.empty((max(expected, 1), h, w, 3), np.uint8)
+            if new_size:
+                frame = cv2.resize(frame, new_size, interpolation=cv2.INTER_AREA)
+            if n >= len(frames):                               # container under-reported its length
+                frames = np.concatenate([frames, np.empty((max(16, len(frames) // 2),) + frames.shape[1:], np.uint8)])
+            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB, dst=frames[n])
+            n += 1
     finally:
         cap.release()
 
-    if not frames:
+    if n == 0:
         raise ValueError(f"No frames could be read from: {path}")
 
-    h0, w0 = frames[0].shape[:2]
-    scale = 1.0
-    if max_side is not None and max(h0, w0) > max_side:
-        scale = max_side / max(h0, w0)
-        new_size = (_even(w0 * scale), _even(h0 * scale))
-        frames = [cv2.resize(f, new_size, interpolation=cv2.INTER_AREA) for f in frames]
-
-    return VideoData(np.stack(frames).astype(np.uint8), float(fps), (w0, h0), scale)
+    return VideoData(frames[:n], float(fps), (w0, h0), scale)
 
 
 def write_video(path: str, frames_bgr: Iterable[np.ndarray], fps: float) -> int:
