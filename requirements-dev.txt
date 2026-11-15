@@ -1,0 +1,4 @@
+# Development extras: tests and notebooks
+-r requirements.txt
+pytest>=7
+jupyter

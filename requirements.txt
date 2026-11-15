@@ -1,8 +1,11 @@
-!pip install --upgrade pip
-!pip install opencv-python matplotlib
-Python 
-PyTorch 
-OpenCV 
-NumPy  
-CoTracker-v3  
-Matplotlib
+# Install with: pip install -r requirements.txt
+# The CoTracker3 model is downloaded automatically via torch.hub on first run.
+torch>=2.0
+opencv-python>=4.8
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.7
+pandas>=1.5
+# web app (app.py) and browser-playable videos
+gradio>=5,<6
+imageio-ffmpeg>=0.5
