@@ -71,13 +71,13 @@ All of it is available from a **web app**, the **command line** and a **Python A
 
 | Joint angle and repetitions | Projectile: g from a throw | Pendulum: period and g |
 |:---:|:---:|:---:|
-| <img src="docs/gifs/joint_angle.gif" width="260"> | <img src="docs/gifs/physics_projectile.gif" width="260"> | <img src="docs/gifs/physics_pendulum.gif" width="260"> |
+| <img src="docs/gifs/joint_angle.gif" width="240"> | <img src="docs/gifs/physics_projectile.gif" width="240"> | <img src="docs/gifs/physics_pendulum.gif" width="240"> |
 
 | Bicycle | Car (drone shot) | Plane |
 |:---:|:---:|:---:|
-| <img src="docs/gifs/bicycle.gif" width="260"> | <img src="docs/gifs/car_side.gif" width="260"> | <img src="docs/gifs/plane.gif" width="260"> |
+| <img src="docs/gifs/bicycle.gif" width="240"> | <img src="docs/gifs/car_side.gif" width="240"> | <img src="docs/gifs/plane.gif" width="240"> |
 | **Tiger** | **Paragliding** | **Apple (moving camera)** |
-| <img src="docs/gifs/tiger.gif" width="260"> | <img src="docs/gifs/paragliding.gif" width="260"> | <img src="docs/gifs/apple.gif" width="260"> |
+| <img src="docs/gifs/tiger.gif" width="240"> | <img src="docs/gifs/paragliding.gif" width="240"> | <img src="docs/gifs/apple.gif" width="240"> |
 
 <sub>The joint-angle and physics clips are rendered test videos with known ground truth, used to measure accuracy (see below).</sub>
 
