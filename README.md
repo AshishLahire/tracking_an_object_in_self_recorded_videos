@@ -47,6 +47,11 @@ in line with the 737-800's typical takeoff speed (about 280–300 km/h).</sub>
 - **Zones:** entries, exits and time spent inside a region.
 - **Heatmap** of where the object spent its time.
 
+### 🚦 Several objects and a two-line speed trap
+Draw a box around each object (cars, players, animals). Each one gets its own colour, path, speed and line crossings, all from a single tracking run.
+
+For speed, draw **line A** and **line B** across the road and enter the real distance between them. Each object's speed is the distance ÷ the time it takes to get from one line to the other, with crossing times interpolated between frames. This is how average-speed cameras work, and it doesn't depend on the camera angle. Passes over a speed limit are flagged.
+
 ### 🦵 Joint angles for physiotherapy and rehab
 Click three points (e.g. hip → knee → ankle) to get the joint angle in every frame, the **range of
 motion** and the **number of repetitions**. Range of motion is normally measured by hand with a goniometer;
@@ -69,9 +74,11 @@ All of it is available from a **web app**, the **command line** and a **Python A
 
 ## 🎬 Demo
 
-| Joint angle and repetitions | Projectile: g from a throw | Pendulum: period and g |
+| Speed trap: two cars | Joint angle and repetitions | Projectile: g from a throw |
 |:---:|:---:|:---:|
-| <img src="docs/gifs/joint_angle.gif" width="240"> | <img src="docs/gifs/physics_projectile.gif" width="240"> | <img src="docs/gifs/physics_pendulum.gif" width="240"> |
+| <img src="docs/gifs/speed_trap.gif" width="240"> | <img src="docs/gifs/joint_angle.gif" width="240"> | <img src="docs/gifs/physics_projectile.gif" width="240"> |
+| **Pendulum: period and g** | | |
+| <img src="docs/gifs/physics_pendulum.gif" width="240"> | | |
 
 | Bicycle | Car (drone shot) | Plane |
 |:---:|:---:|:---:|
@@ -89,6 +96,7 @@ Each measurement mode was checked with the real model against videos where the t
 
 | Test | Measured | True value |
 |---|---|---|
+| Speed trap, two cars in opposite lanes (15 m trap) | **50.02** and **72.03 km/h** (+0.04%); the faster car flagged over 60 km/h | 50 and 72 km/h |
 | Joint angle, hinge bending 170° → 90° (3 reps) | 0.5° mean error (1.2° max); ROM 78.4°; 3 reps | ROM 79.6°; 3 reps |
 | Projectile: gravity | **9.817 ± 0.075 m/s²** (+0.1%) | 9.81 m/s² |
 | Projectile: launch speed and angle | 2.89 m/s at 58.7° | 2.92 m/s at 59.0° |
@@ -123,7 +131,8 @@ The first run downloads the CoTracker3 model (about 100 MB). A GPU is optional: 
 1. Upload a video, or pick an example.
 2. Choose the frame where the object is clearly visible.
 3. Choose what a click adds, then click on the frame:
-   - **Point** or **Box:** the object to track.
+   - **Point** or **Box:** the object to track. Draw several boxes to track several objects.
+   - **Speed trap lines:** line A and line B across the path, then enter the distance between them.
    - **Joint angle:** three clicks: end → joint → end.
    - **Reference length**, **Counting line** or **Zone**.
 4. Optionally open **Physics lab** and choose *Projectile* or *Pendulum*.
@@ -155,6 +164,11 @@ python cli.py --video throw.mp4 --point 120,300 --physics projectile --reference
 ```bash
 # physics lab: pendulum period, and g from its 0.6 m length
 python cli.py --video pendulum.mp4 --point 335,198 --physics pendulum --pendulum-length 0.6
+```
+
+```bash
+# speed trap: two cars, lines A and B 15 m apart, limit 60 km/h
+python cli.py --video road.mp4 --object 20,170,110,210 --object 560,235,640,275 \n    --object-name "car 1" --object-name "car 2" \n    --trap 150,140,150,300,450,140,450,300,15 --speed-limit 60 --csv results/road.csv
 ```
 
 ```bash
@@ -198,7 +212,7 @@ print(r.joints[0]["rom_deg"], r.joints[0]["reps"])
 |---|---|---|
 | 🦵 Physiotherapists and patients | Range of motion is measured by hand, only in the clinic | Joint angle, range of motion and reps from a home video |
 | 🧪 Students and teachers | No motion sensors or photogates in many schools | g, launch speed and pendulum period from a phone video |
-| 🚗 Road-safety studies | Vehicle speeds and counts need radar or manual counting | Speed with a reference length, counting lines |
+| 🚗 Residents and road-safety studies | Proving speeding needs a radar gun or a traffic survey | A phone on a tripod plus a two-line speed trap: speed per vehicle, share over the limit, CSV as evidence |
 | ⚽ Coaches and athletes | Ball and sprint speed, paths | Point or box tracking, speed, CSV export |
 | 🐾 Wildlife researchers | Movement patterns from field footage | Box tracking, heatmap, zones |
 
@@ -254,6 +268,8 @@ flowchart LR
 │   ├── model.py            # CoTracker3 (offline / online modes, model resolution)
 │   ├── selection.py        # box -> points, points -> moving box, background filtering
 │   ├── analysis.py         # speed, distance, line crossings, zones, heatmap
+│   ├── multi.py            # several objects in one run
+│   ├── speedtrap.py        # two-line speed trap with sub-frame timing
 │   ├── joints.py           # joint angles, range of motion, repetition counting
 │   ├── physics.py          # projectile and pendulum fits
 │   ├── stabilize.py        # camera-motion compensation
@@ -266,7 +282,7 @@ flowchart LR
 ├── examples/               # sample videos
 ├── results/videos/         # tracked results
 ├── docs/                   # project report, screenshots, GIFs
-├── tests/                  # 60 tests, no model download needed
+├── tests/                  # 68 tests, no model download needed
 ├── deploy/                 # Hugging Face Space packaging
 ├── Dockerfile · render.yaml
 └── requirements.txt · requirements-dev.txt · pyproject.toml

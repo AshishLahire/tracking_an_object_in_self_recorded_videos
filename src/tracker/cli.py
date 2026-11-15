@@ -70,6 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
                      help="point on the object, 'x,y' (on --frame) or 'frame,x,y'; repeatable")
     sel.add_argument("--box", type=_parse_box, help="box around the object 'x1,y1,x2,y2'; a grid of points "
                                                     "inside it is tracked and the box follows the object")
+    sel.add_argument("--object", action="append", type=_parse_box, default=[],
+                     help="several objects: one box 'x1,y1,x2,y2' per object; repeatable "
+                          "(each gets its own colour, path, speed and speed-trap result)")
+    sel.add_argument("--object-name", action="append", default=[], help="name for each --object (e.g. 'red car')")
     sel.add_argument("--grid", type=int, default=4, help="box mode: grid size (default 4 -> 16 points)")
     sel.add_argument("--joint", action="append", type=_parse_joint, default=[],
                      help="joint angle from 3 points 'x1,y1,x2,y2,x3,y3': one end, the joint, the other end "
@@ -83,6 +87,11 @@ def build_parser() -> argparse.ArgumentParser:
     mes.add_argument("--reference-is-object", action="store_true",
                      help="the reference was measured on the tracked object (needs --box); keeps speed "
                           "correct when the object moves toward / away from the camera")
+    mes.add_argument("--trap", type=lambda s: _numbers(s, (9,), "trap must be 'ax1,ay1,ax2,ay2,bx1,by1,bx2,by2,distance_m'"),
+                     help="two-line speed trap: line A, line B and the real distance between them in metres, "
+                          "'ax1,ay1,ax2,ay2,bx1,by1,bx2,by2,distance_m'. Speed = distance / time from one line to "
+                          "the other. Needs a still camera")
+    mes.add_argument("--speed-limit", type=float, help="speed trap: flag passes faster than this (km/h)")
     mes.add_argument("--line", action="append", type=_parse_line, default=[],
                      help="counting line 'x1,y1,x2,y2'; reports each crossing; repeatable")
     mes.add_argument("--zone", action="append", type=_parse_zone, default=[],
@@ -120,8 +129,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not args.point and not args.box and not args.joint:
-        parser.error("give at least one --point, a --box or a --joint")
+    if not args.point and not args.box and not args.joint and not args.object:
+        parser.error("give at least one --point, --box, --object or --joint")
+    if args.object or args.trap:
+        return _main_multi(args)
 
     from .metrics import format_metrics
     from .pipeline import track_video
@@ -175,7 +186,8 @@ def main(argv=None) -> int:
     if p.get("model") == "projectile":
         print(f"Physics : g = {p['g']:.3f} +/- {p['g_err']:.3f} {p['unit_g']}"
               + (f" ({p['g_error_vs_standard_pct']:+.1f}% vs 9.81)" if p.get("g_error_vs_standard_pct") is not None else "")
-              + f"; launch {p['launch_speed']:.2f} {p['unit_speed']} at {p['launch_angle_deg']:.1f} deg; "
+              + f"; launch {p['launch_speed']:.2f} {p['unit_speed']}"
+              + (f" at {p['launch_angle_deg']:.1f} deg" if p.get("launch_angle_deg") is not None else "") + "; "
               f"fit {p['start_s']:.2f}-{p['end_s']:.2f} s, R2 {p['r2']:.4f}")
     elif p.get("model") == "pendulum":
         print(f"Physics : period {p['period_s']:.4f} +/- {p['period_err_s']:.4f} s, {p['oscillations']:.1f} swings"
@@ -185,6 +197,67 @@ def main(argv=None) -> int:
         print(f"{j['name']:8s}: range of motion {j['rom_deg']:.1f} deg ({j['min_deg']:.1f} to {j['max_deg']:.1f}), "
               f"{j['reps']} repetition(s)" + (f", {j['mean_rep_s']:.2f} s each" if j['reps'] >= 2 else ""))
     print(format_metrics(result.metrics, "Metrics (smoothed tracks)"))
+    return 0
+
+
+def _progress_printer():
+    last = {"step": -1}
+
+    def progress(frac, msg):
+        step = int(frac * 20)
+        if step != last["step"]:
+            last["step"] = step
+            print(f"[{frac:4.0%}] {msg}", flush=True)
+    return progress
+
+
+def _main_multi(args) -> int:
+    """Several objects and / or a speed trap."""
+    from .multi import track_objects
+
+    objects = [{"box": b, "name": (args.object_name[i] if i < len(args.object_name) else f"object {i + 1}")}
+               for i, b in enumerate(args.object)]
+    if args.box:
+        objects.append({"box": args.box, "name": f"object {len(objects) + 1}"})
+    if args.point:
+        objects.append({"points": [p[-2:] for p in args.point], "name": f"object {len(objects) + 1}"})
+    trap = None
+    if args.trap:
+        t = args.trap
+        trap = {"line_a": t[0:4], "line_b": t[4:8], "distance_m": t[8], "limit_kmh": args.speed_limit}
+    output = args.output or os.path.join(
+        "results", os.path.splitext(os.path.basename(args.video))[0].replace(" ", "_") + "_tracked.mp4")
+    try:
+        r = track_objects(args.video, objects, query_frame=args.frame, box_grid=args.grid, speed_trap=trap,
+                          count_lines=args.line, zones=args.zone, reference=args.reference,
+                          output_path=output, csv_path=args.csv, json_path=args.json,
+                          max_side=args.max_side or None, max_frames=args.max_frames, smooth=not args.no_smooth,
+                          device=args.device, mode=args.mode, model_resolution=args.model_res,
+                          browser_compatible=args.browser, progress=_progress_printer())
+    except (FileNotFoundError, IOError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    v = r.video
+    print(f"\nVideo   : {args.video} ({v.num_frames} frames, {v.fps:.2f} FPS)")
+    for label, path in [("Output", r.output_path), ("CSV", r.csv_path), ("Trap CSV", r.passes_csv_path),
+                        ("JSON", r.json_path)]:
+        if path:
+            print(f"{label:8s}: {path}")
+    for o in r.objects:
+        m = o.motion
+        line = f"{o.name:12s}: visible {o.visible_fraction:.0%}, distance {m['distance']:.1f} {m['unit_distance']}"
+        if o.crossings:
+            line += f", {len(o.crossings)} line crossing(s)"
+        print(line)
+    if trap:
+        print(f"\nSpeed trap ({trap['distance_m']:g} m between lines"
+              + (f", limit {args.speed_limit:g} km/h" if args.speed_limit else "") + "):")
+        if not r.passes:
+            print("  no object passed both lines")
+        for p in r.passes:
+            print(f"  {p['object']:12s} {p['from']}->{p['to']}  {p['seconds']:.3f} s  {p['speed_kmh']:6.1f} km/h"
+                  + ("  OVER LIMIT" if p["over_limit"] else ""))
     return 0
 
 

@@ -147,3 +147,76 @@ def draw_joint(img: np.ndarray, pts: np.ndarray, idx: Sequence[int], angle: floa
     cv2.circle(img, b, thickness + 4, (0, 0, 255), -1, cv2.LINE_AA)
     label = f"{name}: {angle:.0f} deg" if name else f"{angle:.0f} deg"
     draw_label(img, label, (b[0] + 10, b[1] - 8), 0.5)
+
+
+TRAP_COLOR = (255, 0, 255)
+OVER_LIMIT_BG = (0, 0, 200)
+
+
+def render_objects(frames: np.ndarray, objects: Sequence[dict], fps: float,
+                   lines: Optional[Sequence] = None, zones: Optional[Sequence] = None,
+                   trap_lines: Optional[Sequence] = None, limit_kmh: Optional[float] = None,
+                   thickness: int = 2) -> Iterator[np.ndarray]:
+    """Yield BGR frames showing several tracked objects.
+
+    Args:
+        frames: (T, H, W, 3) RGB.
+        objects: dicts with ``name``, ``color`` (BGR), ``center`` (T, 2) and optionally ``boxes``
+            (T, 4) and speed-trap ``passes``; all in frame pixels.
+        trap_lines: ``[x1, y1, x2, y2, "A"]`` and the same for "B".
+    """
+    T = frames.shape[0]
+    segments = [[] for _ in objects]
+    was_visible = [False] * len(objects)
+    for t in range(T):
+        img = cv2.cvtColor(frames[t], cv2.COLOR_RGB2BGR)
+        draw_static_overlays(img, lines, zones, thickness)
+        for tl in trap_lines or []:
+            x1, y1, x2, y2 = (int(round(v)) for v in tl[:4])
+            cv2.line(img, (x1, y1), (x2, y2), TRAP_COLOR, thickness + 1, cv2.LINE_AA)
+            top = (x1, y1) if y1 <= y2 else (x2, y2)
+            draw_label(img, f"line {tl[4]}", (top[0] - 20, top[1] - 4), 0.5, (255, 255, 255))
+
+        done = 0
+        for n, o in enumerate(objects):
+            c = o["center"][t]
+            visible = bool(np.all(np.isfinite(c)))
+            if visible:
+                p = (int(round(c[0])), int(round(c[1])))
+                if not was_visible[n]:
+                    segments[n].append([])
+                segments[n][-1].append(p)
+            was_visible[n] = visible
+            polys = [np.array(sg, np.int32).reshape(-1, 1, 2) for sg in segments[n] if len(sg) > 1]
+            if polys:
+                cv2.polylines(img, polys, False, o["color"], thickness, cv2.LINE_AA)
+
+            measured = [ps for ps in o.get("passes", []) if ps["exit_frame"] <= t]
+            done += len(measured)
+            label = o["name"]
+            over = False
+            if measured:
+                label += f"  {measured[-1]['speed_kmh']:.1f} km/h"
+                over = measured[-1]["over_limit"]
+            box = o.get("boxes")
+            if box is not None and np.all(np.isfinite(box[t])):
+                x1, y1, x2, y2 = (int(round(v)) for v in box[t])
+                cv2.rectangle(img, (x1, y1), (x2, y2), o["color"], thickness, cv2.LINE_AA)
+                anchor = (x1, y1 - 4)
+            elif visible:
+                cv2.circle(img, p, 6, o["color"], -1, cv2.LINE_AA)
+                anchor = (p[0] + 8, p[1] - 8)
+            else:
+                continue
+            (tw, th), base = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            ax, ay = int(anchor[0]), max(int(anchor[1]), th + 6)
+            cv2.rectangle(img, (ax - 2, ay - th - 4), (ax + tw + 2, ay + base), OVER_LIMIT_BG if over else o["color"], -1)
+            cv2.putText(img, label, (ax, ay - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                        (255, 255, 255) if over else (0, 0, 0), 1, cv2.LINE_AA)
+
+        if trap_lines:
+            head = f"Speed trap: {done} measured"
+            if limit_kmh:
+                head += f"  |  limit {limit_kmh:g} km/h"
+            draw_label(img, head, (8, 22), 0.55)
+        yield img

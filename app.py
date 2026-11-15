@@ -21,21 +21,24 @@ import gradio as gr  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from tracker import track_video  # noqa: E402
+from tracker import track_objects, track_video  # noqa: E402
 
 MAX_SECONDS = float(os.environ.get("MAX_SECONDS", 20))
 MAX_SIDE = int(os.environ.get("MAX_SIDE", 640))
 PREVIEW_SIDE = 720
 
 CLICK_POINT = "Point on the object"
-CLICK_BOX = "Box around the object (2 clicks)"
+CLICK_BOX = "Box around an object (2 clicks; repeat for more objects)"
 CLICK_REF = "Reference length (2 clicks)"
 CLICK_LINE = "Counting line (2 clicks)"
 CLICK_ZONE = "Zone corner (3+ clicks)"
 CLICK_JOINT = "Joint angle (3 clicks: end, joint, end)"
+CLICK_TRAP = "Speed trap lines (2 lines, 2 clicks each)"
 
-EMPTY_SEL = {"points": [], "box": [], "ref": [], "lines": [], "pending_line": [], "zone": [],
-             "joints": [], "pending_joint": []}
+# "box" holds the first corner of a box being drawn; finished boxes are in "boxes"
+EMPTY_SEL = {"points": [], "box": [], "boxes": [], "ref": [], "lines": [], "pending_line": [], "zone": [],
+             "joints": [], "pending_joint": [], "trap": [], "pending_trap": []}
+BOX_COLORS = [(0, 255, 0), (255, 140, 0), (0, 200, 255), (255, 0, 160), (160, 255, 0), (120, 120, 255)]
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -105,10 +108,21 @@ def draw_selection(frame, sel, scale):
     for xy in sel["ref"]:
         cv2.circle(img, p(xy), 5, (255, 0, 255), -1)
 
-    if len(sel["box"]) == 2:
-        cv2.rectangle(img, p(sel["box"][0]), p(sel["box"][1]), (0, 255, 0), th, cv2.LINE_AA)
+    for i, (a, b) in enumerate(sel["boxes"]):
+        col = BOX_COLORS[i % len(BOX_COLORS)]
+        cv2.rectangle(img, p(a), p(b), col, th, cv2.LINE_AA)
+        cv2.putText(img, f"#{i + 1}", (min(p(a)[0], p(b)[0]), min(p(a)[1], p(b)[1]) - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, col, 2)
     for xy in sel["box"]:
         cv2.circle(img, p(xy), 4, (0, 255, 0), -1)
+
+    for name, line in zip("AB", sel["trap"]):
+        a, b = (line[0], line[1]), (line[2], line[3])
+        cv2.line(img, p(a), p(b), (255, 0, 255), th + 1, cv2.LINE_AA)
+        top = p(a) if a[1] <= b[1] else p(b)
+        cv2.putText(img, name, (top[0] + 4, top[1] + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2)
+    for xy in sel["pending_trap"]:
+        cv2.circle(img, p(xy), 5, (255, 0, 255), -1)
 
     for joint in sel["joints"] + ([sel["pending_joint"]] if sel["pending_joint"] else []):
         for a, b in zip(joint[:-1], joint[1:]):
@@ -127,10 +141,14 @@ def selection_text(sel):
     parts = []
     if sel["points"]:
         parts.append(f"{len(sel['points'])} point(s)")
-    if len(sel["box"]) == 2:
-        parts.append("box")
-    elif sel["box"]:
+    if sel["boxes"]:
+        parts.append(f"{len(sel['boxes'])} object box(es)")
+    if sel["box"]:
         parts.append("box: click the opposite corner")
+    if sel["trap"]:
+        parts.append(f"speed trap line{'s A and B' if len(sel['trap']) == 2 else ' A'}")
+    if sel["pending_trap"]:
+        parts.append("trap line: click the second end")
     if len(sel["ref"]) == 2:
         (x1, y1), (x2, y2) = sel["ref"]
         parts.append(f"reference {np.hypot(x2 - x1, y2 - y1):.0f} px")
@@ -179,7 +197,19 @@ def on_click(info, index, sel, mode, evt: gr.SelectData):
     if mode == CLICK_POINT:
         sel["points"].append(xy)
     elif mode == CLICK_BOX:
-        sel["box"] = [xy] if len(sel["box"]) != 1 else sel["box"] + [xy]
+        if sel["box"]:
+            sel["boxes"].append([sel["box"][0], xy])
+            sel["box"] = []
+        else:
+            sel["box"] = [xy]
+    elif mode == CLICK_TRAP:
+        if len(sel["trap"]) == 2 and not sel["pending_trap"]:
+            sel["trap"] = []                      # a third line starts the trap again
+        sel["pending_trap"].append(xy)
+        if len(sel["pending_trap"]) == 2:
+            (x1, y1), (x2, y2) = sel["pending_trap"]
+            sel["trap"].append((x1, y1, x2, y2))
+            sel["pending_trap"] = []
     elif mode == CLICK_REF:
         sel["ref"] = [xy] if len(sel["ref"]) != 1 else sel["ref"] + [xy]
     elif mode == CLICK_LINE:
@@ -199,8 +229,18 @@ def on_click(info, index, sel, mode, evt: gr.SelectData):
 
 
 def on_undo(info, index, sel, mode):
-    key = {CLICK_POINT: "points", CLICK_BOX: "box", CLICK_REF: "ref", CLICK_ZONE: "zone"}.get(mode)
-    if mode == CLICK_LINE:
+    key = {CLICK_POINT: "points", CLICK_REF: "ref", CLICK_ZONE: "zone"}.get(mode)
+    if mode == CLICK_BOX:
+        if sel["box"]:
+            sel["box"] = []
+        elif sel["boxes"]:
+            sel["boxes"].pop()
+    elif mode == CLICK_TRAP:
+        if sel["pending_trap"]:
+            sel["pending_trap"].pop()
+        elif sel["trap"]:
+            sel["trap"].pop()
+    elif mode == CLICK_LINE:
         if sel["pending_line"]:
             sel["pending_line"].pop()
         elif sel["lines"]:
@@ -223,12 +263,17 @@ def on_clear(info, index):
 
 
 def run(info, index, sel, ref_length, ref_is_object, joint_names, physics, pendulum_len, physics_window,
-        stabilize, smooth, grid, mode, progress=gr.Progress()):
+        trap_dist, speed_limit, object_names, stabilize, smooth, grid, mode, progress=gr.Progress()):
     if not info:
         raise gr.Error("Upload a video first.")
-    has_box = len(sel["box"]) == 2
-    if not sel["points"] and not has_box and not sel["joints"]:
+    if sel["box"] or sel["pending_trap"]:
+        raise gr.Error("Finish the box / trap line you started: it needs a second click.")
+    has_box = len(sel["boxes"]) == 1
+    if not sel["points"] and not sel["boxes"] and not sel["joints"]:
         raise gr.Error("Click at least one point on the object, draw a box around it, or mark a joint.")
+    if len(sel["boxes"]) >= 2 or sel["trap"]:
+        return run_multi(info, index, sel, ref_length, trap_dist, speed_limit, object_names, smooth, grid, mode,
+                         progress)
     if sel["pending_joint"]:
         raise gr.Error("Finish the joint: it needs 3 clicks (end, joint, end).")
     names = [n.strip() for n in (joint_names or "").split(",") if n.strip()]
@@ -258,7 +303,7 @@ def run(info, index, sel, ref_length, ref_is_object, joint_names, physics, pendu
     name = os.path.splitext(os.path.basename(info["path"]))[0].replace(" ", "_")
     box = None
     if has_box:
-        (x1, y1), (x2, y2) = sel["box"]
+        (x1, y1), (x2, y2) = sel["boxes"][0]
         box = (x1, y1, x2, y2)
 
     try:
@@ -310,8 +355,10 @@ def run(info, index, sel, ref_length, ref_is_object, joint_names, physics, pendu
         cmp = (f" ({p['g_error_vs_standard_pct']:+.1f}% vs the standard 9.81 m/s²)"
                if p.get("g_error_vs_standard_pct") is not None else " — add a reference length for m/s²")
         lines += [f"- **Gravity:** g = **{p['g']:.2f} ± {p['g_err']:.2f} {p['unit_g'].replace('^2', '²')}**{cmp}",
-                  f"- **Launch:** {p['launch_speed']:.2f} {p['unit_speed']} at {p['launch_angle_deg']:.1f}° "
-                  f"above horizontal; fitted {p['start_s']:.2f}–{p['end_s']:.2f} s ({p['frames_used']} frames, "
+                  f"- **Launch:** {p['launch_speed']:.2f} {p['unit_speed']}"
+                  + (f" at {p['launch_angle_deg']:.1f}° above horizontal" if p.get("launch_angle_deg") is not None
+                     else " (released from rest)")
+                  + f"; fitted {p['start_s']:.2f}–{p['end_s']:.2f} s ({p['frames_used']} frames, "
                   f"R² = {p['r2']:.4f})"]
     elif p.get("model") == "pendulum":
         lines.append(f"- **Pendulum period:** **{p['period_s']:.3f} ± {p['period_err_s']:.3f} s** "
@@ -338,15 +385,83 @@ def run(info, index, sel, ref_length, ref_is_object, joint_names, physics, pendu
             meas, model = r.center[fit["fit_frames"], ax] - mid, fit["fit_values"] - mid
             ylab = "displacement (px)"
         df = pd.DataFrame({"time (s)": np.concatenate([ft, ft]), ylab: np.concatenate([meas, model]),
-                           "joint": ["measured"] * len(ft) + ["fitted model"] * len(ft)}).dropna()
+                           "series": ["measured"] * len(ft) + ["fitted model"] * len(ft)}).dropna()
     elif r.joints:
         df = pd.DataFrame({"time (s)": np.tile(t, len(r.joints)),
                            "angle (deg)": r.joint_angles.T.ravel(),
-                           "joint": np.repeat([j["name"] for j in r.joints], len(t))}).dropna()
+                           "series": np.repeat([j["name"] for j in r.joints], len(t))}).dropna()
     else:
         df = pd.DataFrame({"time (s)": t, f"speed ({m['unit_speed']})": m["speed"]}).dropna()
     files = [f for f in (r.csv_path, r.object_csv_path, r.joints_csv_path, r.json_path, r.heatmap_path) if f]
     return r.output_path, "\n".join(lines), r.heatmap_image, df, files
+
+
+def run_multi(info, index, sel, ref_length, trap_dist, speed_limit, object_names, smooth, grid, mode, progress):
+    """Several objects and / or a speed trap."""
+    names = [n.strip() for n in (object_names or "").split(",") if n.strip()]
+    objects = [{"box": (a[0], a[1], b[0], b[1]), "name": names[i] if i < len(names) else f"object {i + 1}"}
+               for i, (a, b) in enumerate(sel["boxes"])]
+    if sel["points"]:
+        objects.append({"points": sel["points"], "name": f"object {len(objects) + 1}"})
+    trap = None
+    if sel["trap"]:
+        if len(sel["trap"]) != 2:
+            raise gr.Error("The speed trap needs two lines (A and B).")
+        if not trap_dist or trap_dist <= 0:
+            raise gr.Error("Enter the real distance between the two trap lines (metres).")
+        trap = {"line_a": sel["trap"][0], "line_b": sel["trap"][1], "distance_m": float(trap_dist),
+                "limit_kmh": float(speed_limit) if speed_limit else None}
+    reference = None
+    if len(sel["ref"]) == 2 and ref_length and ref_length > 0:
+        (x1, y1), (x2, y2) = sel["ref"]
+        reference = (x1, y1, x2, y2, float(ref_length))
+    max_frames = int(MAX_SECONDS * info["fps"])
+    if index >= max_frames:
+        raise gr.Error(f"Pick a frame within the first {MAX_SECONDS:g} s of the video.")
+    out_dir = tempfile.mkdtemp(prefix="tracker_")
+    name = os.path.splitext(os.path.basename(info["path"]))[0].replace(" ", "_")
+    try:
+        r = track_objects(
+            info["path"], objects, query_frame=int(index), box_grid=int(grid), speed_trap=trap,
+            count_lines=sel["lines"] or None, zones=[sel["zone"]] if len(sel["zone"]) >= 3 else None,
+            reference=reference, output_path=os.path.join(out_dir, f"{name}_tracked.mp4"),
+            csv_path=os.path.join(out_dir, f"{name}_objects.csv"),
+            json_path=os.path.join(out_dir, f"{name}_summary.json"),
+            max_side=MAX_SIDE, max_frames=max_frames, smooth=smooth, mode=mode, browser_compatible=True,
+            progress=lambda f, msg: progress(f, desc=msg))
+    except ValueError as e:
+        raise gr.Error(str(e))
+
+    lines = [f"### Results for `{os.path.basename(info['path'])}`",
+             f"- **Tracked:** {len(r.objects)} object(s) over {r.video.num_frames} frames "
+             f"({r.video.num_frames / r.video.fps:.1f} s)"]
+    if trap:
+        passes = r.passes
+        lim = f", limit {trap['limit_kmh']:g} km/h" if trap["limit_kmh"] else ""
+        lines.append(f"- **Speed trap** ({trap['distance_m']:g} m between lines{lim}): "
+                     f"**{len(passes)}** pass(es) measured"
+                     + (f", **{sum(p['over_limit'] for p in passes)} over the limit**" if trap["limit_kmh"] else ""))
+        if passes:
+            lines += ["", "| Object | Direction | Time A→B | Speed |", "|---|---|---|---|"]
+            for p in passes:
+                flag = " ⚠️ over limit" if p["over_limit"] else ""
+                lines.append(f"| {p['object']} | {p['from']} → {p['to']} | {p['seconds']:.2f} s | "
+                             f"**{p['speed_kmh']:.1f} km/h**{flag} |")
+        else:
+            lines.append("- *No object crossed both lines. Check the lines lie across the objects' paths.*")
+    for o in r.objects:
+        extra = f", {len(o.crossings)} line crossing(s)" if sel["lines"] else ""
+        for z in o.zones:
+            extra += f", {z['time_inside_s']} s in zone"
+        lines.append(f"- **{o.name}:** visible {o.visible_fraction:.0%} of the time{extra}")
+
+    t = np.arange(r.video.num_frames) / r.video.fps
+    unit = r.objects[0].motion["unit_speed"]
+    df = pd.DataFrame({"time (s)": np.tile(t, len(r.objects)),
+                       f"speed ({unit})": np.concatenate([o.motion["speed"] for o in r.objects]),
+                       "series": np.repeat([o.name for o in r.objects], len(t))}).dropna()
+    files = [f for f in (r.csv_path, r.passes_csv_path, r.json_path) if f]
+    return r.output_path, "\n".join(lines), None, df, files
 
 
 # ---------------------------------------------------------------------------- layout
@@ -363,6 +478,10 @@ speed, a counting line, or a zone, 5) press **Track**.
 **Joint angles (physiotherapy / exercise):** choose *Joint angle* and click three points:
 one end of the limb, the joint, the other end (e.g. hip, knee, ankle). You get the angle over
 time, the range of motion and the number of repetitions. Film the joint side-on.
+
+**Several objects and speed trap:** draw a box around each object (cars, players, animals).
+For a speed trap, choose *Speed trap lines*, draw line A and line B across the road, and enter
+the real distance between them: each object's speed = distance ÷ time from one line to the other.
 
 **Physics lab:** track a thrown or falling ball (add a reference length, e.g. a metre stick in
 the same plane) to measure **g**, launch speed and angle, or a pendulum bob to measure its
@@ -385,7 +504,8 @@ def build_app():
                     gr.Examples(EXAMPLES, inputs=video_in, label="Or try an example")
                 note = gr.Markdown("Upload a video to start.")
                 frame_idx = gr.Slider(0, 1, value=0, step=1, label="2. Frame to select the object on")
-                click_mode = gr.Radio([CLICK_POINT, CLICK_BOX, CLICK_JOINT, CLICK_REF, CLICK_LINE, CLICK_ZONE],
+                click_mode = gr.Radio([CLICK_POINT, CLICK_BOX, CLICK_TRAP, CLICK_JOINT, CLICK_REF, CLICK_LINE,
+                                       CLICK_ZONE],
                                       value=CLICK_POINT, label="3. What does a click add?")
                 ref_len = gr.Number(label="Reference real length (metres)", value=1.0, minimum=0)
                 ref_obj = gr.Checkbox(label="The reference is the tracked object itself (e.g. the car's length). "
@@ -396,6 +516,12 @@ def build_app():
                 with gr.Row():
                     undo_btn = gr.Button("Undo last")
                     clear_btn = gr.Button("Clear all")
+                with gr.Accordion("Several objects / speed trap", open=False):
+                    object_names = gr.Textbox(label="Object names in box order, comma-separated (optional)",
+                                              placeholder="red car, blue car")
+                    trap_dist = gr.Number(label="Real distance between trap lines A and B (metres)", value=None,
+                                          minimum=0)
+                    speed_limit = gr.Number(label="Speed limit (km/h), optional", value=None, minimum=0)
                 with gr.Accordion("Physics lab", open=False):
                     physics = gr.Radio(["Off", "Projectile / falling object", "Pendulum"], value="Off",
                                        label="Fit a physics model to the object's path")
@@ -435,16 +561,17 @@ def build_app():
 
         def _run(*args, progress=gr.Progress()):
             vid, md, hm, df, files = run(*args, progress=progress)
-            if "joint" in df.columns:
-                ycol = [c for c in df.columns if c not in ("time (s)", "joint")][0]
-                title = "Joint angle over time" if ycol == "angle (deg)" else "Measured path vs physics model"
-                plot = gr.LinePlot(value=df, x="time (s)", y=ycol, color="joint", label=title, height=300)
+            if "series" in df.columns:
+                ycol = [c for c in df.columns if c not in ("time (s)", "series")][0]
+                title = {"angle (deg)": "Joint angle over time"}.get(
+                    ycol, "Speed over time" if ycol.startswith("speed") else "Measured path vs physics model")
+                plot = gr.LinePlot(value=df, x="time (s)", y=ycol, color="series", label=title, height=300)
             else:
                 plot = gr.LinePlot(value=df, x=df.columns[0], y=df.columns[1], label="Speed over time", height=300)
             return vid, md, hm, plot, files
 
         run_btn.click(_run, [info, frame_idx, sel, ref_len, ref_obj, joint_names, physics, pendulum_len,
-                             physics_window, stabilize, smooth, grid, mode],
+                             physics_window, trap_dist, speed_limit, object_names, stabilize, smooth, grid, mode],
                       [video_out, summary, heat, speed_plot, files_out])
     return demo
 
