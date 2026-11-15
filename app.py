@@ -222,8 +222,8 @@ def on_clear(info, index):
     return sel, img, selection_text(sel)
 
 
-def run(info, index, sel, ref_length, ref_is_object, joint_names, stabilize, smooth, grid, mode,
-        progress=gr.Progress()):
+def run(info, index, sel, ref_length, ref_is_object, joint_names, physics, pendulum_len, physics_window,
+        stabilize, smooth, grid, mode, progress=gr.Progress()):
     if not info:
         raise gr.Error("Upload a video first.")
     has_box = len(sel["box"]) == 2
@@ -232,6 +232,14 @@ def run(info, index, sel, ref_length, ref_is_object, joint_names, stabilize, smo
     if sel["pending_joint"]:
         raise gr.Error("Finish the joint: it needs 3 clicks (end, joint, end).")
     names = [n.strip() for n in (joint_names or "").split(",") if n.strip()]
+    physics = {"Projectile / falling object": "projectile", "Pendulum": "pendulum"}.get(physics)
+    window = None
+    if physics_window and physics_window.strip():
+        try:
+            window = tuple(float(v) for v in physics_window.replace(" ", "").split(","))
+            assert len(window) == 2 and window[1] > window[0]
+        except (ValueError, AssertionError):
+            raise gr.Error("Fit window must be 'start,end' in seconds, e.g. 0.5,1.8")
 
     reference = None
     if len(sel["ref"]) == 2:
@@ -266,6 +274,8 @@ def run(info, index, sel, ref_length, ref_is_object, joint_names, stabilize, smo
             zones=[sel["zone"]] if len(sel["zone"]) >= 3 else None,
             stabilize=stabilize, browser_compatible=True,
             joints=sel["joints"] or None, joint_names=names or None,
+            physics=physics, physics_window=window,
+            pendulum_length_m=float(pendulum_len) if pendulum_len else None,
             progress=lambda f, msg: progress(f, desc=msg))
     except ValueError as e:
         raise gr.Error(str(e))
@@ -295,9 +305,41 @@ def run(info, index, sel, ref_length, ref_is_object, joint_names, stabilize, smo
                      + (f", {j['mean_rep_s']:.1f} s each" if j['mean_rep_s'] == j['mean_rep_s'] else ""))
     if r.joints:
         lines.append("- *Angles are measured in the video plane: film the joint side-on for accurate values.*")
+    p = r.physics
+    if p.get("model") == "projectile":
+        cmp = (f" ({p['g_error_vs_standard_pct']:+.1f}% vs the standard 9.81 m/s²)"
+               if p.get("g_error_vs_standard_pct") is not None else " — add a reference length for m/s²")
+        lines += [f"- **Gravity:** g = **{p['g']:.2f} ± {p['g_err']:.2f} {p['unit_g'].replace('^2', '²')}**{cmp}",
+                  f"- **Launch:** {p['launch_speed']:.2f} {p['unit_speed']} at {p['launch_angle_deg']:.1f}° "
+                  f"above horizontal; fitted {p['start_s']:.2f}–{p['end_s']:.2f} s ({p['frames_used']} frames, "
+                  f"R² = {p['r2']:.4f})"]
+    elif p.get("model") == "pendulum":
+        lines.append(f"- **Pendulum period:** **{p['period_s']:.3f} ± {p['period_err_s']:.3f} s** "
+                     f"({p['oscillations']:.1f} swings fitted, R² = {p['r2']:.4f})")
+        if "g" in p:
+            lines.append(f"- **Gravity:** g = 4π²L/T² = **{p['g']:.2f} ± {p['g_err']:.2f} m/s²** "
+                         f"({p['g_error_vs_standard_pct']:+.1f}% vs 9.81)")
+        else:
+            lines.append("- *Enter the pendulum length to get g.*")
 
     t = np.arange(r.video.num_frames) / r.video.fps
-    if r.joints:
+    if r.physics_fit:
+        fit = r.physics_fit
+        ft = fit["fit_frames"] / r.video.fps
+        if p["model"] == "projectile":   # height above the first fitted point, upward positive
+            unit = p["unit_length"]
+            sc = p["m_per_px"] or 1.0
+            meas = (fit["fit_y"][0] - r.center[fit["fit_frames"], 1]) * sc
+            model = (fit["fit_y"][0] - fit["fit_y"]) * sc
+            ylab = f"height ({unit})"
+        else:
+            ax = fit["fit_axis"]
+            mid = np.mean(fit["fit_values"])
+            meas, model = r.center[fit["fit_frames"], ax] - mid, fit["fit_values"] - mid
+            ylab = "displacement (px)"
+        df = pd.DataFrame({"time (s)": np.concatenate([ft, ft]), ylab: np.concatenate([meas, model]),
+                           "joint": ["measured"] * len(ft) + ["fitted model"] * len(ft)}).dropna()
+    elif r.joints:
         df = pd.DataFrame({"time (s)": np.tile(t, len(r.joints)),
                            "angle (deg)": r.joint_angles.T.ravel(),
                            "joint": np.repeat([j["name"] for j in r.joints], len(t))}).dropna()
@@ -321,6 +363,10 @@ speed, a counting line, or a zone, 5) press **Track**.
 **Joint angles (physiotherapy / exercise):** choose *Joint angle* and click three points:
 one end of the limb, the joint, the other end (e.g. hip, knee, ankle). You get the angle over
 time, the range of motion and the number of repetitions. Film the joint side-on.
+
+**Physics lab:** track a thrown or falling ball (add a reference length, e.g. a metre stick in
+the same plane) to measure **g**, launch speed and angle, or a pendulum bob to measure its
+**period** (and g from its length). Use a still camera, side-on to the motion.
 """
 
 EXAMPLES = sorted(glob.glob(os.path.join(ROOT, "examples", "*.mp4")))
@@ -350,6 +396,13 @@ def build_app():
                 with gr.Row():
                     undo_btn = gr.Button("Undo last")
                     clear_btn = gr.Button("Clear all")
+                with gr.Accordion("Physics lab", open=False):
+                    physics = gr.Radio(["Off", "Projectile / falling object", "Pendulum"], value="Off",
+                                       label="Fit a physics model to the object's path")
+                    pendulum_len = gr.Number(label="Pendulum length in metres (pivot to centre of the bob)",
+                                             value=None, minimum=0)
+                    physics_window = gr.Textbox(label="Only fit between these times (s), optional",
+                                                placeholder="0.5,1.8")
                 with gr.Accordion("Options", open=False):
                     stabilize = gr.Checkbox(label="Compensate camera shake / panning (handheld videos)", value=False)
                     smooth = gr.Checkbox(label="Smooth trajectories", value=True)
@@ -383,13 +436,15 @@ def build_app():
         def _run(*args, progress=gr.Progress()):
             vid, md, hm, df, files = run(*args, progress=progress)
             if "joint" in df.columns:
-                plot = gr.LinePlot(value=df, x="time (s)", y="angle (deg)", color="joint",
-                                   label="Joint angle over time", height=300)
+                ycol = [c for c in df.columns if c not in ("time (s)", "joint")][0]
+                title = "Joint angle over time" if ycol == "angle (deg)" else "Measured path vs physics model"
+                plot = gr.LinePlot(value=df, x="time (s)", y=ycol, color="joint", label=title, height=300)
             else:
                 plot = gr.LinePlot(value=df, x=df.columns[0], y=df.columns[1], label="Speed over time", height=300)
             return vid, md, hm, plot, files
 
-        run_btn.click(_run, [info, frame_idx, sel, ref_len, ref_obj, joint_names, stabilize, smooth, grid, mode],
+        run_btn.click(_run, [info, frame_idx, sel, ref_len, ref_obj, joint_names, physics, pendulum_len,
+                             physics_window, stabilize, smooth, grid, mode],
                       [video_out, summary, heat, speed_plot, files_out])
     return demo
 

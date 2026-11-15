@@ -87,6 +87,12 @@ def build_parser() -> argparse.ArgumentParser:
                      help="counting line 'x1,y1,x2,y2'; reports each crossing; repeatable")
     mes.add_argument("--zone", action="append", type=_parse_zone, default=[],
                      help="zone polygon 'x,y;x,y;x,y;...'; reports entries/exits/time inside; repeatable")
+    mes.add_argument("--physics", choices=["projectile", "pendulum"],
+                     help="physics lab: fit a thrown/falling object (g, launch speed, angle) or a pendulum "
+                          "(period; g with --pendulum-length). Use a still, side-on camera and --reference for SI units")
+    mes.add_argument("--pendulum-length", type=float, help="pendulum length in metres (pivot to centre of the bob)")
+    mes.add_argument("--window", type=lambda s: _numbers(s, (2,), "window must be 'start_s,end_s'"),
+                     help="physics lab: only fit between these times, 'start_s,end_s'")
     mes.add_argument("--stabilize", action="store_true",
                      help="compensate camera shake / panning before measuring (handheld videos)")
 
@@ -142,7 +148,8 @@ def main(argv=None) -> int:
             reference=args.reference, reference_is_object=args.reference_is_object,
             count_lines=args.line, zones=args.zone,
             stabilize=args.stabilize, browser_compatible=args.browser, progress=progress,
-            joints=[[j[0:2], j[2:4], j[4:6]] for j in args.joint] or None, joint_names=args.joint_name or None)
+            joints=[[j[0:2], j[2:4], j[4:6]] for j in args.joint] or None, joint_names=args.joint_name or None,
+            physics=args.physics, physics_window=args.window, pendulum_length_m=args.pendulum_length)
     except (FileNotFoundError, IOError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -164,6 +171,16 @@ def main(argv=None) -> int:
         print(f"Crossings: {json.dumps(result.crossings)}")
     for z in result.zones:
         print(f"Zone {z['zone']}  : {len(z['entries'])} entries, {z['time_inside_s']} s inside")
+    p = result.physics
+    if p.get("model") == "projectile":
+        print(f"Physics : g = {p['g']:.3f} +/- {p['g_err']:.3f} {p['unit_g']}"
+              + (f" ({p['g_error_vs_standard_pct']:+.1f}% vs 9.81)" if p.get("g_error_vs_standard_pct") is not None else "")
+              + f"; launch {p['launch_speed']:.2f} {p['unit_speed']} at {p['launch_angle_deg']:.1f} deg; "
+              f"fit {p['start_s']:.2f}-{p['end_s']:.2f} s, R2 {p['r2']:.4f}")
+    elif p.get("model") == "pendulum":
+        print(f"Physics : period {p['period_s']:.4f} +/- {p['period_err_s']:.4f} s, {p['oscillations']:.1f} swings"
+              + (f"; g = {p['g']:.3f} +/- {p['g_err']:.3f} m/s^2 ({p['g_error_vs_standard_pct']:+.1f}% vs 9.81)"
+                 if "g" in p else "") + f"; R2 {p['r2']:.4f}")
     for j in result.joints:
         print(f"{j['name']:8s}: range of motion {j['rom_deg']:.1f} deg ({j['min_deg']:.1f} to {j['max_deg']:.1f}), "
               f"{j['reps']} repetition(s)" + (f", {j['mean_rep_s']:.2f} s each" if j['reps'] >= 2 else ""))

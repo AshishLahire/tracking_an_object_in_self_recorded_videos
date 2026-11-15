@@ -34,6 +34,7 @@ line with a Boeing 737-800's typical takeoff speed (about 280–300 km/h).
 | **Line crossings** | Draw a line and get the time and direction of every crossing, e.g. counting vehicles or laps. |
 | **Zones** | Draw a polygon to get entries, exits and time spent inside. |
 | **Joint angles (rehab / exercise)** | Click three points (e.g. hip, knee, ankle) to get the joint angle in every frame, the range of motion and the number of repetitions, with a per-frame angle CSV. In a test video with known angles, the error was 0.5° on average and every repetition was counted. |
+| **Physics lab** | Track a thrown or falling ball (with a reference length in the scene) to measure **g**, launch speed and angle; the throw and landing are trimmed off automatically. Track a pendulum to measure its period, and g from its length. In test videos with known physics: g within 0.1% for the projectile and 0.01% for the pendulum. |
 | **Heatmap** | Shows where the object spent the most time. |
 | **Shaky-camera compensation** | Removes handheld shake and panning before measuring, so speed reflects the object's motion, not the camera's. |
 | **Exports** | Annotated video (H.264, plays in browsers), per-point CSV, per-frame object CSV (position, speed, box), JSON summary, heatmap PNG. |
@@ -46,7 +47,7 @@ line with a Boeing 737-800's typical takeoff speed (about 280–300 km/h).
 | Who | Problem | What to use |
 |---|---|---|
 | Sports coaches and athletes | Ball flight, sprint speed, jump arc from a phone video | Point tracking, reference length, CSV |
-| Physics students and teachers | Measuring projectiles, pendulums or falling objects without lab sensors | Reference length, per-frame CSV for graphs |
+| Physics students and teachers | Schools without motion sensors or photogates can't measure motion experiments | Physics lab mode: a phone video gives g, launch speed and pendulum period, with the measured path and fitted model ready for a lab report |
 | Wildlife and agriculture researchers | Animal movement and behaviour from field footage | Box tracking, heatmap, zones |
 | Traffic and road-safety studies | Vehicle speed and counts at a junction | Reference length, counting lines |
 | Physiotherapy and rehab | Range of motion is measured by hand with a goniometer, and patients can't measure at home | Joint-angle mode: film an exercise, get range of motion and repetitions, compare week by week |
@@ -58,6 +59,7 @@ line with a Boeing 737-800's typical takeoff speed (about 280–300 km/h).
 - With a fixed reference (e.g. a stick on the ground), the object must stay about as far from the camera as the reference.
 - With `--reference-is-object` the object can come closer or move away, but the box must fit it tightly.
 - A camera that follows the object (e.g. a drone) needs `--stabilize` and a visible background.
+- Physics lab needs a still camera, side-on to the motion, with the reference at the same distance as the object. The pendulum formula assumes small swings (under about 15°), and a higher frame rate (60 fps) gives better results.
 - Joint angles are measured in the video plane, so film the joint side-on. Loose clothing over the joint lowers accuracy. Treat the results as a progress aid, not a medical diagnosis.
 - Do not track people without their consent.
 
@@ -97,6 +99,12 @@ python cli.py --video examples/plane.mp4 --box 205,100,372,152 --grid 5 --stabil
 
 # knee range of motion and repetitions: hip, knee, ankle on frame 0 (film side-on)
 python cli.py --video my_exercise.mp4 --joint 210,120,220,260,230,400 --joint-name knee --csv results/knee.csv
+
+# physics lab: measure g from a thrown ball (a 1 m ruler lies in the same plane, from x=100 to x=350)
+python cli.py --video throw.mp4 --point 120,300 --physics projectile --reference 100,340,350,340,1.0
+
+# physics lab: pendulum period, and g from its 0.6 m length
+python cli.py --video pendulum.mp4 --point 335,198 --physics pendulum --pendulum-length 0.6
 
 # count crossings of a line and time spent inside a zone
 python cli.py --video examples/bicycle.mp4 --frame 70 --point 125,50 \
@@ -174,6 +182,7 @@ On a laptop CPU, expect a few minutes for a 10-second clip. On a GPU (e.g. Colab
 │   ├── selection.py        # box -> points, points -> moving box, background-point filtering
 │   ├── analysis.py         # speed, distance, line crossings, zones, heatmap
 │   ├── joints.py           # joint angles, range of motion, repetition counting
+│   ├── physics.py          # physics lab: projectile and pendulum fits
 │   ├── stabilize.py        # camera-motion compensation
 │   ├── smoothing.py        # occlusion-aware smoothing
 │   ├── draw.py             # overlays (paths, boxes, lines, zones, labels)

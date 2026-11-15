@@ -13,6 +13,7 @@ BOX_COLOR = (0, 255, 0)        # BGR
 LINE_COLOR = (0, 215, 255)
 ZONE_COLOR = (255, 160, 0)
 TEXT_BG = (0, 0, 0)
+CURVE_COLOR = (0, 255, 255)
 
 
 def point_colors(n: int, seed: int = 0) -> list:
@@ -62,7 +63,8 @@ def render_frames(frames: np.ndarray, tracks: np.ndarray, visibility: np.ndarray
                   lines: Optional[Sequence] = None, zones: Optional[Sequence] = None,
                   texts: Optional[Sequence[Optional[str]]] = None,
                   draw_trails=True, point_radii: Optional[Sequence[int]] = None,
-                  joints: Optional[Sequence[dict]] = None) -> Iterator[np.ndarray]:
+                  joints: Optional[Sequence[dict]] = None,
+                  curves: Optional[Sequence[np.ndarray]] = None) -> Iterator[np.ndarray]:
     """Yield BGR frames with each point's current position and its trajectory so far.
 
     The trajectory is split into segments at occlusions, so no line is drawn
@@ -79,6 +81,7 @@ def render_frames(frames: np.ndarray, tracks: np.ndarray, visibility: np.ndarray
         point_radii: optional radius per point (overrides ``point_radius``).
         joints: optional list of ``{"idx": (i, j, k), "angle": (T,) degrees, "name": str}``;
             draws the two limb segments and the current angle at the joint.
+        curves: optional static (M, 2) polylines, e.g. a fitted trajectory.
     """
     num_frames = frames.shape[0]
     num_points = tracks.shape[1]
@@ -92,6 +95,11 @@ def render_frames(frames: np.ndarray, tracks: np.ndarray, visibility: np.ndarray
     for t in range(num_frames):
         frame_bgr = cv2.cvtColor(frames[t], cv2.COLOR_RGB2BGR)
         draw_static_overlays(frame_bgr, lines, zones, line_thickness)
+        for curve in curves or []:
+            pts = np.asarray(curve, dtype=np.float64)
+            pts = pts[np.all(np.isfinite(pts), axis=1)].round().astype(np.int32).reshape(-1, 1, 2)
+            if len(pts) > 1:
+                cv2.polylines(frame_bgr, [pts], False, CURVE_COLOR, 1, cv2.LINE_AA)
 
         for pid in range(num_points):
             visible = bool(visibility[t, pid] > vis_threshold)
