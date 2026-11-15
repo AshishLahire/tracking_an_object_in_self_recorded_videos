@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import os
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
 import cv2
 import numpy as np
@@ -218,3 +218,14 @@ def make_gif(video_path: str, gif_path: str, width: int = 360, fps: int = 10,
         return True
     except (subprocess.CalledProcessError, OSError):
         return False
+
+
+def save_joints_csv(path: str, angles: np.ndarray, names: Sequence[str], fps: float) -> None:
+    """One row per frame: time and the angle (degrees) of each joint; empty where not measured."""
+    folder = os.path.dirname(os.path.abspath(path))
+    os.makedirs(folder, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["frame", "time_s"] + [f"{n.replace(' ', '_')}_deg" for n in names])
+        for t in range(angles.shape[0]):
+            w.writerow([t, f"{t / fps:.4f}"] + ["" if not np.isfinite(a) else f"{a:.2f}" for a in angles[t]])

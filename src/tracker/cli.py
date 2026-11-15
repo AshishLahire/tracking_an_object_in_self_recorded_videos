@@ -44,6 +44,10 @@ def _parse_reference(text):
     return _numbers(text, (5,), "reference must be 'x1,y1,x2,y2,length_m'")
 
 
+def _parse_joint(text):
+    return _numbers(text, (6,), "joint must be 'x1,y1,x2,y2,x3,y3' (end, joint, end)")
+
+
 def _parse_zone(text):
     try:
         pts = [tuple(float(v) for v in p.split(",")) for p in text.replace(" ", "").split(";") if p]
@@ -67,6 +71,10 @@ def build_parser() -> argparse.ArgumentParser:
     sel.add_argument("--box", type=_parse_box, help="box around the object 'x1,y1,x2,y2'; a grid of points "
                                                     "inside it is tracked and the box follows the object")
     sel.add_argument("--grid", type=int, default=4, help="box mode: grid size (default 4 -> 16 points)")
+    sel.add_argument("--joint", action="append", type=_parse_joint, default=[],
+                     help="joint angle from 3 points 'x1,y1,x2,y2,x3,y3': one end, the joint, the other end "
+                          "(e.g. hip,knee,ankle); reports range of motion and repetitions; repeatable")
+    sel.add_argument("--joint-name", action="append", default=[], help="name for each --joint (e.g. knee)")
     sel.add_argument("--frame", type=int, default=0, help="frame on which points / box / lines are given (default 0)")
 
     mes = p.add_argument_group("measurements")
@@ -106,8 +114,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if not args.point and not args.box:
-        parser.error("give at least one --point or a --box")
+    if not args.point and not args.box and not args.joint:
+        parser.error("give at least one --point, a --box or a --joint")
 
     from .metrics import format_metrics
     from .pipeline import track_video
@@ -133,7 +141,8 @@ def main(argv=None) -> int:
             smooth=not args.no_smooth, device=args.device, mode=args.mode, model_resolution=args.model_res,
             reference=args.reference, reference_is_object=args.reference_is_object,
             count_lines=args.line, zones=args.zone,
-            stabilize=args.stabilize, browser_compatible=args.browser, progress=progress)
+            stabilize=args.stabilize, browser_compatible=args.browser, progress=progress,
+            joints=[[j[0:2], j[2:4], j[4:6]] for j in args.joint] or None, joint_names=args.joint_name or None)
     except (FileNotFoundError, IOError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -143,7 +152,8 @@ def main(argv=None) -> int:
     print(f"\nVideo   : {args.video} ({v.num_frames} frames, {v.fps:.2f} FPS, "
           f"{v.original_size[0]}x{v.original_size[1]} -> {v.size[0]}x{v.size[1]})")
     for label, path in [("Output", result.output_path), ("CSV", result.csv_path),
-                        ("Object", result.object_csv_path), ("JSON", result.json_path),
+                        ("Object", result.object_csv_path), ("Joints", result.joints_csv_path),
+                        ("JSON", result.json_path),
                         ("Heatmap", result.heatmap_path)]:
         if path:
             print(f"{label:8s}: {path}")
@@ -154,6 +164,9 @@ def main(argv=None) -> int:
         print(f"Crossings: {json.dumps(result.crossings)}")
     for z in result.zones:
         print(f"Zone {z['zone']}  : {len(z['entries'])} entries, {z['time_inside_s']} s inside")
+    for j in result.joints:
+        print(f"{j['name']:8s}: range of motion {j['rom_deg']:.1f} deg ({j['min_deg']:.1f} to {j['max_deg']:.1f}), "
+              f"{j['reps']} repetition(s)" + (f", {j['mean_rep_s']:.2f} s each" if j['reps'] >= 2 else ""))
     print(format_metrics(result.metrics, "Metrics (smoothed tracks)"))
     return 0
 

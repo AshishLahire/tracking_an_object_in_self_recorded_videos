@@ -32,8 +32,10 @@ CLICK_BOX = "Box around the object (2 clicks)"
 CLICK_REF = "Reference length (2 clicks)"
 CLICK_LINE = "Counting line (2 clicks)"
 CLICK_ZONE = "Zone corner (3+ clicks)"
+CLICK_JOINT = "Joint angle (3 clicks: end, joint, end)"
 
-EMPTY_SEL = {"points": [], "box": [], "ref": [], "lines": [], "pending_line": [], "zone": []}
+EMPTY_SEL = {"points": [], "box": [], "ref": [], "lines": [], "pending_line": [], "zone": [],
+             "joints": [], "pending_joint": []}
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -108,6 +110,12 @@ def draw_selection(frame, sel, scale):
     for xy in sel["box"]:
         cv2.circle(img, p(xy), 4, (0, 255, 0), -1)
 
+    for joint in sel["joints"] + ([sel["pending_joint"]] if sel["pending_joint"] else []):
+        for a, b in zip(joint[:-1], joint[1:]):
+            cv2.line(img, p(a), p(b), (255, 255, 255), th + 1, cv2.LINE_AA)
+        for n, xy in enumerate(joint):
+            cv2.circle(img, p(xy), 6 if n == 1 else 4, (255, 60, 60) if n == 1 else (255, 255, 255), -1)
+
     for i, xy in enumerate(sel["points"]):
         cv2.circle(img, p(xy), 6, (0, 255, 255), -1)
         cv2.circle(img, p(xy), 6, (0, 0, 0), 1)
@@ -134,6 +142,11 @@ def selection_text(sel):
         parts.append("line: click the second end")
     if sel["zone"]:
         parts.append(f"zone with {len(sel['zone'])} corner(s)")
+    if sel["joints"]:
+        parts.append(f"{len(sel['joints'])} joint(s)")
+    if sel["pending_joint"]:
+        nxt = ["the joint itself", "the other end"][len(sel["pending_joint"]) - 1]
+        parts.append(f"joint: now click {nxt}")
     return "Selected: " + (", ".join(parts) if parts else "nothing yet. Click on the object in the frame.")
 
 
@@ -177,6 +190,11 @@ def on_click(info, index, sel, mode, evt: gr.SelectData):
             sel["pending_line"] = []
     elif mode == CLICK_ZONE:
         sel["zone"].append(xy)
+    elif mode == CLICK_JOINT:
+        sel["pending_joint"].append(xy)
+        if len(sel["pending_joint"]) == 3:
+            sel["joints"].append(sel["pending_joint"])
+            sel["pending_joint"] = []
     return sel, draw_selection(read_frame(info["path"], index), sel, info["scale"]), selection_text(sel)
 
 
@@ -187,6 +205,11 @@ def on_undo(info, index, sel, mode):
             sel["pending_line"].pop()
         elif sel["lines"]:
             sel["lines"].pop()
+    elif mode == CLICK_JOINT:
+        if sel["pending_joint"]:
+            sel["pending_joint"].pop()
+        elif sel["joints"]:
+            sel["pending_joint"] = sel["joints"].pop()[:2]
     elif key and sel[key]:
         sel[key].pop()
     img = draw_selection(read_frame(info["path"], index), sel, info["scale"]) if info else None
@@ -199,12 +222,16 @@ def on_clear(info, index):
     return sel, img, selection_text(sel)
 
 
-def run(info, index, sel, ref_length, ref_is_object, stabilize, smooth, grid, mode, progress=gr.Progress()):
+def run(info, index, sel, ref_length, ref_is_object, joint_names, stabilize, smooth, grid, mode,
+        progress=gr.Progress()):
     if not info:
         raise gr.Error("Upload a video first.")
     has_box = len(sel["box"]) == 2
-    if not sel["points"] and not has_box:
-        raise gr.Error("Click at least one point on the object, or draw a box around it.")
+    if not sel["points"] and not has_box and not sel["joints"]:
+        raise gr.Error("Click at least one point on the object, draw a box around it, or mark a joint.")
+    if sel["pending_joint"]:
+        raise gr.Error("Finish the joint: it needs 3 clicks (end, joint, end).")
+    names = [n.strip() for n in (joint_names or "").split(",") if n.strip()]
 
     reference = None
     if len(sel["ref"]) == 2:
@@ -238,6 +265,7 @@ def run(info, index, sel, ref_length, ref_is_object, stabilize, smooth, grid, mo
             count_lines=sel["lines"] or None,
             zones=[sel["zone"]] if len(sel["zone"]) >= 3 else None,
             stabilize=stabilize, browser_compatible=True,
+            joints=sel["joints"] or None, joint_names=names or None,
             progress=lambda f, msg: progress(f, desc=msg))
     except ValueError as e:
         raise gr.Error(str(e))
@@ -261,11 +289,22 @@ def run(info, index, sel, ref_length, ref_is_object, stabilize, smooth, grid, mo
             lines.append(f"  - line {c['line']}: frame {c['frame']} ({c['time_s']} s), {c['direction']}")
     for z in r.zones:
         lines.append(f"- **Zone:** entered {len(z['entries'])} time(s), {z['time_inside_s']} s inside")
+    for j in r.joints:
+        lines.append(f"- **{j['name'].capitalize()} angle:** range of motion **{j['rom_deg']:.0f}°** "
+                     f"(from {j['min_deg']:.0f}° to {j['max_deg']:.0f}°), **{j['reps']} repetition(s)**"
+                     + (f", {j['mean_rep_s']:.1f} s each" if j['mean_rep_s'] == j['mean_rep_s'] else ""))
+    if r.joints:
+        lines.append("- *Angles are measured in the video plane: film the joint side-on for accurate values.*")
 
     t = np.arange(r.video.num_frames) / r.video.fps
-    speed_df = pd.DataFrame({"time (s)": t, f"speed ({m['unit_speed']})": m["speed"]}).dropna()
-    files = [r.csv_path, r.object_csv_path, r.json_path, r.heatmap_path]
-    return r.output_path, "\n".join(lines), r.heatmap_image, speed_df, files
+    if r.joints:
+        df = pd.DataFrame({"time (s)": np.tile(t, len(r.joints)),
+                           "angle (deg)": r.joint_angles.T.ravel(),
+                           "joint": np.repeat([j["name"] for j in r.joints], len(t))}).dropna()
+    else:
+        df = pd.DataFrame({"time (s)": t, f"speed ({m['unit_speed']})": m["speed"]}).dropna()
+    files = [f for f in (r.csv_path, r.object_csv_path, r.joints_csv_path, r.json_path, r.heatmap_path) if f]
+    return r.output_path, "\n".join(lines), r.heatmap_image, df, files
 
 
 # ---------------------------------------------------------------------------- layout
@@ -278,6 +317,10 @@ Powered by [CoTracker3](https://github.com/facebookresearch/co-tracker).
 (the start of its motion works best), 3) click on the object, or switch to *Box* and click two
 opposite corners, 4) optionally add a reference length (e.g. a car is about 4.5 m long) for real
 speed, a counting line, or a zone, 5) press **Track**.
+
+**Joint angles (physiotherapy / exercise):** choose *Joint angle* and click three points:
+one end of the limb, the joint, the other end (e.g. hip, knee, ankle). You get the angle over
+time, the range of motion and the number of repetitions. Film the joint side-on.
 """
 
 EXAMPLES = sorted(glob.glob(os.path.join(ROOT, "examples", "*.mp4")))
@@ -296,12 +339,14 @@ def build_app():
                     gr.Examples(EXAMPLES, inputs=video_in, label="Or try an example")
                 note = gr.Markdown("Upload a video to start.")
                 frame_idx = gr.Slider(0, 1, value=0, step=1, label="2. Frame to select the object on")
-                click_mode = gr.Radio([CLICK_POINT, CLICK_BOX, CLICK_REF, CLICK_LINE, CLICK_ZONE],
+                click_mode = gr.Radio([CLICK_POINT, CLICK_BOX, CLICK_JOINT, CLICK_REF, CLICK_LINE, CLICK_ZONE],
                                       value=CLICK_POINT, label="3. What does a click add?")
                 ref_len = gr.Number(label="Reference real length (metres)", value=1.0, minimum=0)
                 ref_obj = gr.Checkbox(label="The reference is the tracked object itself (e.g. the car's length). "
                                             "Keeps speed right when it moves toward or away from the camera; needs a box.",
                                       value=False)
+                joint_names = gr.Textbox(label="Joint name(s), comma-separated (optional)",
+                                         placeholder="knee, elbow")
                 with gr.Row():
                     undo_btn = gr.Button("Undo last")
                     clear_btn = gr.Button("Clear all")
@@ -324,8 +369,8 @@ def build_app():
             summary = gr.Markdown()
         with gr.Row():
             heat = gr.Image(label="Where the object spent time (heatmap)", type="numpy")
-            speed_plot = gr.LinePlot(x="time (s)", y="speed", label="Speed over time", height=300)
-        files_out = gr.File(label="Downloads (CSV per point, CSV per frame, JSON summary, heatmap)",
+            speed_plot = gr.LinePlot(x="time (s)", y="speed", label="Speed / joint angle over time", height=300)
+        files_out = gr.File(label="Downloads (CSV per point, CSV per frame, joint angles CSV, JSON summary, heatmap)",
                             file_count="multiple")
 
         video_in.change(on_video, video_in, [info, frame_idx, preview, sel, note]).then(
@@ -337,10 +382,14 @@ def build_app():
 
         def _run(*args, progress=gr.Progress()):
             vid, md, hm, df, files = run(*args, progress=progress)
-            plot = gr.LinePlot(value=df, x=df.columns[0], y=df.columns[1], label="Speed over time", height=300)
+            if "joint" in df.columns:
+                plot = gr.LinePlot(value=df, x="time (s)", y="angle (deg)", color="joint",
+                                   label="Joint angle over time", height=300)
+            else:
+                plot = gr.LinePlot(value=df, x=df.columns[0], y=df.columns[1], label="Speed over time", height=300)
             return vid, md, hm, plot, files
 
-        run_btn.click(_run, [info, frame_idx, sel, ref_len, ref_obj, stabilize, smooth, grid, mode],
+        run_btn.click(_run, [info, frame_idx, sel, ref_len, ref_obj, joint_names, stabilize, smooth, grid, mode],
                       [video_out, summary, heat, speed_plot, files_out])
     return demo
 

@@ -13,11 +13,13 @@ import numpy as np
 from .analysis import (heatmap, heatmap_overlay, line_crossings, meters_per_pixel, motion_stats,
                        object_scale_m_per_px, zone_events)
 from .draw import render_frames
+from .joints import analyze_joints
 from .metrics import evaluate_tracking
 from .selection import boxes_from_tracks, normalize_box, object_center, object_point_mask, points_in_box
 from .smoothing import smooth_tracks
 from .stabilize import apply_transforms, estimate_camera_motion, transform_scale
-from .video_io import VideoData, load_video, save_object_csv, save_tracks_csv, to_browser_mp4, write_video
+from .video_io import (VideoData, load_video, save_joints_csv, save_object_csv, save_tracks_csv, to_browser_mp4,
+                       write_video)
 
 
 def _clean(value):
@@ -42,12 +44,15 @@ class TrackingResult:
     crossings: list = field(default_factory=list)
     zones: list = field(default_factory=list)
     heatmap_image: Optional[np.ndarray] = None   # RGB, loaded-frame size
+    joint_angles: Optional[np.ndarray] = None    # (T, J) degrees
+    joints: list = field(default_factory=list)   # per joint: name, range of motion, repetitions
     metrics: dict = field(default_factory=dict)
     raw_metrics: dict = field(default_factory=dict)
     stabilized: bool = False
     output_path: Optional[str] = None
     csv_path: Optional[str] = None
     object_csv_path: Optional[str] = None
+    joints_csv_path: Optional[str] = None
     json_path: Optional[str] = None
     heatmap_path: Optional[str] = None
 
@@ -65,6 +70,7 @@ class TrackingResult:
             "motion": motion,
             "line_crossings": self.crossings,
             "zones": self.zones,
+            "joints": [{k: _clean(v) for k, v in j.items()} for j in self.joints],
             "metrics": {k: _clean(val) for k, val in self.metrics.items()},
         }
 
@@ -107,6 +113,16 @@ def _speed_texts(speed: np.ndarray, unit: str, crossings: list, fps: float) -> l
     return texts
 
 
+def _rep_texts(joint_stats: list, num_frames: int) -> list:
+    """Per-frame label with the running repetition count of each joint."""
+    counts = np.zeros((num_frames, len(joint_stats)), int)
+    for n, js in enumerate(joint_stats):
+        for ev in js["rep_events"]:
+            counts[ev["frame"]:, n] += 1
+    return ["  |  ".join(f"{js['name']} reps: {counts[t, n]}" for n, js in enumerate(joint_stats))
+            for t in range(num_frames)]
+
+
 def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_frame: int = 0,
                 box: Optional[Sequence[float]] = None, box_grid: int = 4,
                 output_path: Optional[str] = None, csv_path: Optional[str] = None,
@@ -119,6 +135,8 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
                 zones: Optional[Sequence[Sequence[Sequence[float]]]] = None,
                 stabilize: bool = False, browser_compatible: bool = False,
                 show_speed: bool = True,
+                joints: Optional[Sequence[Sequence[Sequence[float]]]] = None,
+                joint_names: Optional[Sequence[str]] = None,
                 tracker_fn: Optional[Callable] = None,
                 progress: Optional[Callable[[float, str], None]] = None,
                 **draw_kwargs) -> TrackingResult:
@@ -145,6 +163,9 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
         stabilize: compensate camera shake / panning before measuring (handheld videos).
         browser_compatible: re-encode the output video to H.264 (needs imageio-ffmpeg / ffmpeg).
         show_speed: write the current speed (and crossing count) on the video.
+        joints: joints to measure, each three ``(x, y)`` points: one end, the joint, the other end
+            (e.g. hip, knee, ankle). Reports the angle per frame, range of motion and repetitions.
+        joint_names: optional names for the joints ("knee", "elbow", ...).
         tracker_fn: ``fn(frames, queries) -> (tracks, visibility)``; defaults to CoTracker3.
         progress: optional ``fn(fraction, message)`` callback.
         **draw_kwargs: forwarded to :func:`tracker.draw.render_frames`.
@@ -160,9 +181,17 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
         raise ValueError(f"Query frame {query_frame} is outside the video (0..{video.num_frames - 1})")
 
     all_points = list(points)
+    joint_idx = []
+    for jp in joints or []:
+        if len(jp) != 3:
+            raise ValueError("Each joint needs exactly 3 points: end, joint, end")
+        joint_idx.append(tuple(range(len(all_points), len(all_points) + 3)))
+        all_points += [tuple(p) for p in jp]
+    box_start = len(all_points)
     if box is not None:
         box = normalize_box(box)
         all_points += points_in_box(box, box_grid)
+    box_sl = slice(box_start, len(all_points))
     queries = make_queries(all_points, query_frame, s, video.num_frames)
 
     report(0.1, f"Tracking {len(queries)} point(s) over {video.num_frames} frames")
@@ -192,8 +221,9 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
     boxes = None
     if box is not None:
         box_px = [v * s for v in box]
-        result.object_points = object_point_mask(smoothed, visibility, box_px, query_frame)
-        boxes = boxes_from_tracks(smoothed, visibility, box_px, query_frame, point_mask=result.object_points)
+        result.object_points = object_point_mask(smoothed[:, box_sl], visibility[:, box_sl], box_px, query_frame)
+        boxes = boxes_from_tracks(smoothed[:, box_sl], visibility[:, box_sl], box_px, query_frame,
+                                  point_mask=result.object_points)
         result.boxes = boxes
     center_px = object_center(smoothed, visibility, boxes=boxes)
 
@@ -223,6 +253,9 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
     for i, zone in enumerate(zones or []):
         result.zones.append({"zone": i, **zone_events(result.center, zone, video.fps)})
 
+    if joint_idx:
+        result.joint_angles, result.joints = analyze_joints(smoothed, visibility, joint_idx, video.fps, joint_names)
+
     heat = heatmap(measure_px, video.size)
     result.heatmap_image = heatmap_overlay(video.frames[query_frame], heat)
     if heatmap_path:
@@ -242,15 +275,24 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
             draw_tracks = np.concatenate([smoothed, np.nan_to_num(center_px)[:, None, :]], axis=1)
             draw_vis = np.concatenate([visibility, c_vis], axis=1)
             trails = [False] * n + [True]
-            radii = [2 if on else 0 for on in result.object_points] + [5]   # hide background points
+            radii = ([draw_kwargs.get("point_radius", 4)] * box_start
+                     + [2 if on else 0 for on in result.object_points] + [5])   # hide background points
         texts = None
         if show_speed and (reference is not None or count_lines):
             texts = _speed_texts(result.motion["speed"], result.motion["unit_speed"], result.crossings, video.fps)
         lines = [[v * s for v in ln] for ln in (count_lines or [])]
         polys = [[(x * s, y * s) for x, y in z] for z in (zones or [])]
+        joint_overlays = None
+        if joint_idx:
+            joint_overlays = [{"idx": idx, "angle": result.joint_angles[:, n], "name": result.joints[n]["name"]}
+                              for n, idx in enumerate(joint_idx)]
+            if texts is None:                              # running repetition count, top-left
+                texts = _rep_texts(result.joints, video.num_frames)
+            if trails is True:                             # limb lines replace the point trails
+                trails = [i >= box_start for i in range(n)]
         frames_iter = render_frames(video.frames, draw_tracks, draw_vis, boxes=boxes, lines=lines,
                                     zones=polys, texts=texts, draw_trails=trails, point_radii=radii,
-                                    **draw_kwargs)
+                                    joints=joint_overlays, **draw_kwargs)
         write_video(output_path, frames_iter, video.fps)
         if browser_compatible:
             to_browser_mp4(output_path)
@@ -263,6 +305,10 @@ def track_video(video_path: str, points: Sequence[Sequence[float]] = (), query_f
         result.object_csv_path = f"{stem}_object.csv"
         save_object_csv(result.object_csv_path, result.center, video.fps, result.motion["speed"],
                         result.motion["unit_speed"], None if boxes is None else boxes / s)
+        if joint_idx:
+            result.joints_csv_path = f"{stem}_joints.csv"
+            save_joints_csv(result.joints_csv_path, result.joint_angles, [j["name"] for j in result.joints],
+                            video.fps)
 
     if json_path:
         os.makedirs(os.path.dirname(os.path.abspath(json_path)), exist_ok=True)

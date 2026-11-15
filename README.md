@@ -33,6 +33,7 @@ line with a Boeing 737-800's typical takeoff speed (about 280–300 km/h).
 | **Speed and distance** | Mark something of known length once (a 1 m stick, a 4.5 m car) to get km/h and metres. Without it, results are in pixels. If the reference is the tracked object itself, the scale follows the object's size, so speed stays right as it comes closer or moves away. |
 | **Line crossings** | Draw a line and get the time and direction of every crossing, e.g. counting vehicles or laps. |
 | **Zones** | Draw a polygon to get entries, exits and time spent inside. |
+| **Joint angles (rehab / exercise)** | Click three points (e.g. hip, knee, ankle) to get the joint angle in every frame, the range of motion and the number of repetitions, with a per-frame angle CSV. In a test video with known angles, the error was 0.5° on average and every repetition was counted. |
 | **Heatmap** | Shows where the object spent the most time. |
 | **Shaky-camera compensation** | Removes handheld shake and panning before measuring, so speed reflects the object's motion, not the camera's. |
 | **Exports** | Annotated video (H.264, plays in browsers), per-point CSV, per-frame object CSV (position, speed, box), JSON summary, heatmap PNG. |
@@ -48,7 +49,7 @@ line with a Boeing 737-800's typical takeoff speed (about 280–300 km/h).
 | Physics students and teachers | Measuring projectiles, pendulums or falling objects without lab sensors | Reference length, per-frame CSV for graphs |
 | Wildlife and agriculture researchers | Animal movement and behaviour from field footage | Box tracking, heatmap, zones |
 | Traffic and road-safety studies | Vehicle speed and counts at a junction | Reference length, counting lines |
-| Physiotherapy and rehab | Joint or gait motion over a session | Several points, CSV export |
+| Physiotherapy and rehab | Range of motion is measured by hand with a goniometer, and patients can't measure at home | Joint-angle mode: film an exercise, get range of motion and repetitions, compare week by week |
 | Video creators | Making text or blur follow an object | Box track as per-frame CSV |
 
 **Limits.**
@@ -57,6 +58,7 @@ line with a Boeing 737-800's typical takeoff speed (about 280–300 km/h).
 - With a fixed reference (e.g. a stick on the ground), the object must stay about as far from the camera as the reference.
 - With `--reference-is-object` the object can come closer or move away, but the box must fit it tightly.
 - A camera that follows the object (e.g. a drone) needs `--stabilize` and a visible background.
+- Joint angles are measured in the video plane, so film the joint side-on. Loose clothing over the joint lowers accuracy. Treat the results as a progress aid, not a medical diagnosis.
 - Do not track people without their consent.
 
 ---
@@ -92,6 +94,9 @@ python cli.py --video examples/bicycle.mp4 --frame 70 --point 125,50
 python cli.py --video examples/plane.mp4 --box 205,100,372,152 --grid 5 --stabilize \
     --reference 210,135,345,127,39.5 --reference-is-object \
     --csv results/plane.csv --json results/plane.json --heatmap results/plane_heat.png --browser
+
+# knee range of motion and repetitions: hip, knee, ankle on frame 0 (film side-on)
+python cli.py --video my_exercise.mp4 --joint 210,120,220,260,230,400 --joint-name knee --csv results/knee.csv
 
 # count crossings of a line and time spent inside a zone
 python cli.py --video examples/bicycle.mp4 --frame 70 --point 125,50 \
@@ -168,6 +173,7 @@ On a laptop CPU, expect a few minutes for a 10-second clip. On a GPU (e.g. Colab
 │   ├── model.py            # CoTracker3 (offline / online modes)
 │   ├── selection.py        # box -> points, points -> moving box, background-point filtering
 │   ├── analysis.py         # speed, distance, line crossings, zones, heatmap
+│   ├── joints.py           # joint angles, range of motion, repetition counting
 │   ├── stabilize.py        # camera-motion compensation
 │   ├── smoothing.py        # occlusion-aware smoothing
 │   ├── draw.py             # overlays (paths, boxes, lines, zones, labels)

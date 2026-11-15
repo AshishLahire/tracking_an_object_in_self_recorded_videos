@@ -61,7 +61,8 @@ def render_frames(frames: np.ndarray, tracks: np.ndarray, visibility: np.ndarray
                   boxes: Optional[np.ndarray] = None,
                   lines: Optional[Sequence] = None, zones: Optional[Sequence] = None,
                   texts: Optional[Sequence[Optional[str]]] = None,
-                  draw_trails=True, point_radii: Optional[Sequence[int]] = None) -> Iterator[np.ndarray]:
+                  draw_trails=True, point_radii: Optional[Sequence[int]] = None,
+                  joints: Optional[Sequence[dict]] = None) -> Iterator[np.ndarray]:
     """Yield BGR frames with each point's current position and its trajectory so far.
 
     The trajectory is split into segments at occlusions, so no line is drawn
@@ -76,6 +77,8 @@ def render_frames(frames: np.ndarray, tracks: np.ndarray, visibility: np.ndarray
         texts: optional per-frame label drawn top-left (e.g. current speed).
         draw_trails: draw each point's past path; a bool, or one bool per point.
         point_radii: optional radius per point (overrides ``point_radius``).
+        joints: optional list of ``{"idx": (i, j, k), "angle": (T,) degrees, "name": str}``;
+            draws the two limb segments and the current angle at the joint.
     """
     num_frames = frames.shape[0]
     num_points = tracks.shape[1]
@@ -108,6 +111,9 @@ def render_frames(frames: np.ndarray, tracks: np.ndarray, visibility: np.ndarray
                 if radii[pid] > 0:
                     cv2.circle(frame_bgr, (x, y), radii[pid], colors[pid], -1, cv2.LINE_AA)
 
+        for jt in joints or []:
+            draw_joint(frame_bgr, tracks[t], jt["idx"], jt["angle"][t], jt.get("name", ""), line_thickness)
+
         if boxes is not None and np.all(np.isfinite(boxes[t])):
             x1, y1, x2, y2 = (int(round(v)) for v in boxes[t])
             cv2.rectangle(frame_bgr, (x1, y1), (x2, y2), BOX_COLOR, line_thickness, cv2.LINE_AA)
@@ -116,3 +122,20 @@ def render_frames(frames: np.ndarray, tracks: np.ndarray, visibility: np.ndarray
             draw_label(frame_bgr, texts[t], (8, 22), 0.55)
 
         yield frame_bgr
+
+
+JOINT_COLOR = (255, 255, 255)
+
+
+def draw_joint(img: np.ndarray, pts: np.ndarray, idx: Sequence[int], angle: float, name: str = "",
+               thickness: int = 2) -> None:
+    """Two limb segments meeting at the joint, with the current angle written next to it."""
+    if not np.isfinite(angle):
+        return
+    a, b, c = (tuple(int(round(float(v))) for v in pts[i]) for i in idx)
+    for p, q in ((a, b), (b, c)):
+        cv2.line(img, p, q, (0, 0, 0), thickness + 3, cv2.LINE_AA)
+        cv2.line(img, p, q, JOINT_COLOR, thickness + 1, cv2.LINE_AA)
+    cv2.circle(img, b, thickness + 4, (0, 0, 255), -1, cv2.LINE_AA)
+    label = f"{name}: {angle:.0f} deg" if name else f"{angle:.0f} deg"
+    draw_label(img, label, (b[0] + 10, b[1] - 8), 0.5)
